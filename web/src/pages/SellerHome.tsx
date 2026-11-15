@@ -53,6 +53,7 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
   const [drops, setDrops] = useState<SellerDropSummary[] | null>(null);
   const [title, setTitle] = useState('');
   const [liveUrl, setLiveUrl] = useState('');
+  const [hold, setHold] = useState(5);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -71,12 +72,18 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
 
       <form className="mt-6 rounded-[26px] border border-line bg-card p-5 shadow-[var(--shadow-card)]" onSubmit={async (e) => {
         e.preventDefault(); setBusy(true); setErr('');
-        try { const d = await api.createDrop({ title, liveUrl }); nav(`/sell/${d.id}`); }
+        try { const d = await api.createDrop({ title, liveUrl, holdMinutes: hold }); nav(`/sell/${d.id}`); }
         catch (e2) { setErr(e2 instanceof Error ? e2.message : 'Could not create the drop'); setBusy(false); }
       }}>
         <div className="font-display text-xl font-bold">Start a new drop</div>
         <input className="input mt-3" placeholder="e.g. Sunday thrift drop — 20 pieces" value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={80} />
         <input className="input mt-2" placeholder="YouTube live link (optional)" value={liveUrl} onChange={(e) => setLiveUrl(e.target.value)} maxLength={300} />
+        <label className="mt-3 flex items-center justify-between gap-3 text-sm text-ink-2">
+          <span>Winner gets this long to pay before the next person in line is promoted</span>
+          <select className="rounded-lg border border-line bg-white px-2 py-1.5 font-semibold text-ink" value={hold} onChange={(e) => setHold(Number(e.target.value))}>
+            {[2, 3, 5, 10, 15].map((m) => <option key={m} value={m}>{m} min</option>)}
+          </select>
+        </label>
         {err && <p className="mt-2 text-sm font-semibold text-hot-dark">{err}</p>}
         <button className="btn mt-3 w-full bg-hot py-3 text-white" disabled={busy || !title.trim()}>{busy ? <Spinner /> : 'Create drop room'}</button>
       </form>

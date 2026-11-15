@@ -49,7 +49,7 @@ class OrderUpdateBubble extends HTMLElement {
     if (!this._m) return;
     const u = contentOf<OrderUpdateContent>(this._m);
     const tone = u.status === 'paid' ? '#14a06a' : u.status === 'paying' ? '#8a5a00' : '#3a312a';
-    this.innerHTML = `<div style="font-family:Inter,system-ui,sans-serif;max-width:280px;padding:8px 12px;border-radius:12px;background:#f5efe8;font-size:13px;color:${tone}">${esc(u.text)}</div>`;
+    this.innerHTML = `<div style="font-family:Inter,system-ui,sans-serif;max-width:280px;white-space:pre-line;padding:8px 12px;border-radius:12px;background:#f5efe8;font-size:13px;color:${tone}">${esc(u.text)}</div>`;
   }
 }
 

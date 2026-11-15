@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, ApiError, sessions, type SellerClaim, type SellerDrop } from '../api';
 import { rt, type RtMessage } from '../rt';
-import { Avatar, CopyButton, Logo, QR, Spinner, StatusChip, Toasts, useToasts } from '../components/ui';
+import { Avatar, CopyButton, Logo, QR, Sheet, Spinner, StatusChip, Toasts, useToasts } from '../components/ui';
 import { DMThread } from '../components/DMThread';
 import { chatUIReady, mountChatUI, openDirect, setupChatUI } from '../chatui';
 import { mmss, resizeImage, rupees, useCountdown, useDebounced } from '../util';
@@ -21,6 +21,7 @@ export default function SellerConsole() {
   const [inboxPeer, setInboxPeer] = useState<string | null>(null);
   const [chatUI, setChatUI] = useState(false); // Nexconn Chat UI inbox available (desktop + Nexconn mode)
   const [inboxOpen, setInboxOpen] = useState(false);
+  const [deviceOpen, setDeviceOpen] = useState(false);
   const inboxBox = useRef<HTMLDivElement>(null);
   const toasts = useToasts();
   const seller = sessions.seller();
@@ -145,7 +146,16 @@ export default function SellerConsole() {
                 <CopyButton text={link} label="Copy link" />
                 <a className="btn bg-[#25D366] px-4 py-2 text-sm text-white" target="_blank" rel="noreferrer"
                   href={`https://wa.me/?text=${encodeURIComponent(`🔥 ${drop.shop} is dropping LIVE now — first tap wins! ${link}`)}`}>WhatsApp</a>
+                <button className="btn border-2 border-ink px-4 py-1.5 text-sm" onClick={() => act(() => api.downloadOrders(drop.id))}>Orders CSV</button>
+                <button className="btn border-2 border-line px-4 py-1.5 text-sm text-ink-2" onClick={() => setDeviceOpen(true)}>Use on another device</button>
               </div>
+              <label className="mt-2 flex items-center gap-2 text-sm text-ink-2">
+                Time to pay after winning:
+                <select className="rounded-lg border border-line bg-white px-2 py-1 font-semibold text-ink" value={Math.round(drop.holdSeconds / 60)}
+                  onChange={(e) => act(() => api.updateDrop(drop.id, { holdMinutes: Number(e.target.value) }), `Buyers now get ${e.target.value} min to pay`)}>
+                  {[2, 3, 5, 10, 15].map((m) => <option key={m} value={m}>{m} min</option>)}
+                </select>
+              </label>
               <div className="mt-3 grid grid-cols-4 gap-2 text-center">
                 {[['Joined', stats.viewers], ['Claim taps', stats.claimAttempts], ['Sold', stats.sold], ['Revenue', rupees(stats.revenue)]].map(([k, v]) => (
                   <div key={k as string} className="rounded-xl bg-paper px-1 py-2">
@@ -255,6 +265,20 @@ export default function SellerConsole() {
         </aside>
       </main>
 
+      <Sheet open={deviceOpen} onClose={() => setDeviceOpen(false)} title="Open your shop on another device">
+        {seller && (() => {
+          const loginLink = `${location.origin}/sell/login#${seller.id}.${seller.key}`;
+          return (
+            <div className="space-y-3 pb-2">
+              <p className="text-ink-2">Scan this with your phone (or laptop) to manage drops there too — handy when you go live on your phone and confirm payments on a laptop.</p>
+              <div className="flex justify-center"><QR value={loginLink} size={200} /></div>
+              <CopyButton text={loginLink} label="Copy login link" className="w-full" />
+              <p className="rounded-xl bg-hot-soft px-3 py-2 text-sm font-semibold text-hot-dark">Keep this private: anyone with this link can manage your shop.</p>
+            </div>
+          );
+        })()}
+      </Sheet>
+
       {/* Nexconn Chat UI inbox (desktop). Kept mounted so Chat UI keeps its state between opens. */}
       {chatUI && (
         <div className={`fixed inset-0 z-50 items-center justify-center p-6 ${inboxOpen ? 'flex' : 'hidden'}`} role="dialog" aria-modal aria-label="Inbox">
@@ -346,8 +370,20 @@ function ItemRow({ it, claims, ended, onDrop, onClose, onDelete, onConfirm, onRe
           <button className="btn bg-white px-3 py-1.5 text-xs" onClick={() => onReject(holder)}>Next in line</button>
         </div>
       )}
+      {holder && <ShipTo c={holder} />}
       {waiting.length > 0 && <div className="mt-2 text-xs text-muted">Waitlist: {waiting.map((w) => w.buyerName).join(' → ')}</div>}
       {winner && <div className="mt-2 text-sm font-semibold text-mint">Sold to {winner.buyerName}</div>}
+      {winner && <ShipTo c={winner} />}
+    </div>
+  );
+}
+
+function ShipTo({ c }: { c: SellerClaim }) {
+  if (!c.shipAddress) return null;
+  return (
+    <div className="mt-2 rounded-xl bg-paper px-3 py-2 text-[13px] leading-snug text-ink-2">
+      <span className="font-semibold text-ink">Ship to {c.buyerName}:</span> {c.shipAddress} — {c.shipPincode}
+      {c.shipPhone && <> · <a className="font-semibold text-ink underline" href={`tel:+91${c.shipPhone}`}>{c.shipPhone}</a></>}
     </div>
   );
 }
@@ -363,6 +399,7 @@ function PayRow({ c, it, onConfirm, onReject, onChat }: { c: SellerClaim; it: It
           <div className="text-xs text-ink-2">{rupees(it?.price ?? 0)} · {c.status === 'paying' ? `says paid${c.utr ? ` (UTR ${c.utr})` : ''}` : `waiting for payment · ${mmss(left)}`}</div>
         </div>
       </div>
+      <ShipTo c={c} />
       <div className="mt-2 flex gap-2">
         <button className="btn flex-1 bg-mint py-2 text-sm text-white" onClick={onConfirm}>Payment received</button>
         <button className="btn bg-paper px-3 py-2 text-sm" onClick={onReject}>Next</button>

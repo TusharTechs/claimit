@@ -72,7 +72,7 @@ function Bubble({ m }: { m: RtMessage }) {
   }
   if (m.type === MSG.ORDER_UPDATE) {
     const u = m.content as OrderUpdateContent;
-    return <div className="mx-auto max-w-xs rounded-xl bg-line/50 px-3 py-2 text-center text-[13px] text-ink-2">{u.text}</div>;
+    return <div className="mx-auto max-w-xs whitespace-pre-line rounded-xl bg-line/50 px-3 py-2 text-center text-[13px] text-ink-2">{u.text}</div>;
   }
   const text = m.content?.text ?? m.content?.content ?? '';
   return (

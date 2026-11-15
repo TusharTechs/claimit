@@ -5,6 +5,7 @@ import './index.css';
 import Landing from './pages/Landing';
 import SellerHome from './pages/SellerHome';
 import SellerConsole from './pages/SellerConsole';
+import SellerLogin from './pages/SellerLogin';
 import Room from './pages/Room';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
@@ -15,6 +16,7 @@ createRoot(document.getElementById('root')!).render(
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/sell" element={<SellerHome />} />
+        <Route path="/sell/login" element={<SellerLogin />} />
         <Route path="/sell/:dropId" element={<SellerConsole />} />
         <Route path="/d/:dropId" element={<Room />} />
         <Route path="*" element={<Landing />} />

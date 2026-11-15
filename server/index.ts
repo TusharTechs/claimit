@@ -373,7 +373,18 @@ if (fs.existsSync(webDist)) {
     ].join('\n    ');
     res.type('html').send(indexHtml.replace('<title>ClaimIt — fair live drops</title>', `<title>${esc(title)}</title>\n    ${tags}`));
   });
-  app.get(/^\/(?!api\/|img\/).*/, (_req, res) => res.type('html').send(indexHtml));
+  app.get(/^\/(?!api\/|img\/).*/, (req, res) => {
+    const base = config.publicUrl || `${req.protocol}://${req.get('host')}`;
+    const tags = [
+      `<meta property="og:type" content="website" />`,
+      `<meta property="og:site_name" content="ClaimIt" />`,
+      `<meta property="og:title" content="ClaimIt — fair live drops for social sellers" />`,
+      `<meta property="og:description" content="Turn 'comment MINE to buy' into a fair claim queue everyone can see. First tap wins, pay by UPI." />`,
+      `<meta property="og:image" content="${base}/og.png" />`,
+      `<meta name="twitter:card" content="summary_large_image" />`,
+    ].join('\n    ');
+    res.type('html').send(indexHtml.replace('</title>', `</title>\n    ${tags}`));
+  });
 }
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
