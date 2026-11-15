@@ -17,6 +17,7 @@ Thousands of small sellers in India run Instagram and YouTube lives and WhatsApp
 | Product drops and claim events land even when chat floods | **Priority message types** (`CI:Drop`, `CI:Event`) plus server `priority: 2` sends |
 | Fan chatter is shed first under load | **Low-priority message type** (`CI:Chat`) |
 | Order card, payment updates, buyer and seller chat | **Direct channel**: custom `CI:Order` / `CI:OrderUpd` messages via the Server API, plus text via the SDK |
+| Seller inbox on desktop: every order chat with history, images and files | **Nexconn Chat UI** (`@nexconn/chatui`), with custom Web Component bubbles that render ClaimIt order cards inside Chat UI |
 | Live viewer count | Open channel participant events |
 | Identity | Server-issued **access tokens** (`/v4/auth/access-token/issue`). The App Secret never reaches the browser. |
 
@@ -70,4 +71,4 @@ The script builds locally and uploads the app. It writes the `NEXCONN_*` keys fr
 
 - React, Vite and Tailwind on the web
 - Express and SQLite (`node:sqlite`) on Node 22
-- Nexconn Chat SDK (`@nexconn/chat`) and the Nexconn Platform Chat API
+- Nexconn Chat SDK (`@nexconn/chat`), Nexconn Chat UI (`@nexconn/chatui`) and the Nexconn Platform Chat API

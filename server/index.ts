@@ -96,6 +96,18 @@ app.post('/api/seller/session', h(async (req) => {
   return { ...s, userId, token: await nexconn.token(userId, s.shop) };
 }));
 
+/** Names for Nexconn Chat UI (its reqUserProfiles hook): buyers who ordered from this seller, plus the seller. */
+app.get('/api/seller/profiles', h((req) => {
+  const s = seller(req);
+  const ids = String(req.query.ids || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 100);
+  return ids.map((userId) => {
+    if (userId === sellerUserId(s.id)) return { userId, name: s.shop };
+    const b = db.prepare(`SELECT b.name FROM buyers b WHERE b.id = ? AND EXISTS (
+      SELECT 1 FROM claims c JOIN drops d ON d.id = c.drop_id WHERE c.buyer_id = b.id AND d.seller_id = ?)`).get(userId, s.id) as { name: string } | undefined;
+    return { userId, name: b?.name ?? 'Buyer' };
+  });
+}));
+
 app.get('/api/seller/drops', h((req) => {
   const s = seller(req);
   return db.prepare(`SELECT d.id, d.title, d.status, d.created,

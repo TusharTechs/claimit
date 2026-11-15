@@ -4,6 +4,7 @@ import { api, ApiError, sessions, type SellerClaim, type SellerDrop } from '../a
 import { rt, type RtMessage } from '../rt';
 import { Avatar, CopyButton, Logo, QR, Spinner, StatusChip, Toasts, useToasts } from '../components/ui';
 import { DMThread } from '../components/DMThread';
+import { chatUIReady, mountChatUI, openDirect, setupChatUI } from '../chatui';
 import { mmss, resizeImage, rupees, useCountdown, useDebounced } from '../util';
 import { MSG, type ChatContent, type EventContent, type Item } from '../../../shared/types';
 
@@ -18,6 +19,9 @@ export default function SellerConsole() {
   const [viewers, setViewers] = useState<number | null>(null);
   const [unread, setUnread] = useState<Record<string, number>>({});
   const [inboxPeer, setInboxPeer] = useState<string | null>(null);
+  const [chatUI, setChatUI] = useState(false); // Nexconn Chat UI inbox available (desktop + Nexconn mode)
+  const [inboxOpen, setInboxOpen] = useState(false);
+  const inboxBox = useRef<HTMLDivElement>(null);
   const toasts = useToasts();
   const seller = sessions.seller();
 
@@ -47,8 +51,11 @@ export default function SellerConsole() {
     (async () => {
       try {
         const s = await api.sellerSession();
+        const wide = window.matchMedia('(min-width: 1024px)').matches;
+        if (wide && !rt.me) rt.beforeConnect(() => setupChatUI(s.userId, s.shop));
         await rt.connect(s.token, s.userId);
         if (cancelled) return;
+        setChatUI(chatUIReady());
         const r = await rt.enterOpen(channelId);
         setViewers(r.count);
       } catch (e) { toasts.push(e instanceof Error ? e.message : 'Realtime connection failed', 'hot'); }
@@ -67,6 +74,15 @@ export default function SellerConsole() {
     });
     return () => { cancelled = true; offMeta(); offCount(); offMsg(); rt.exitOpen(channelId).catch(() => {}); };
   }, [channelId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (inboxOpen && inboxBox.current) mountChatUI(inboxBox.current);
+  }, [inboxOpen]);
+
+  const openInbox = (buyerId?: string) => {
+    setInboxOpen(true);
+    if (buyerId) { setUnread((u) => ({ ...u, [buyerId]: 0 })); openDirect(buyerId).catch(() => {}); }
+  };
 
   const claimsByItem = useMemo(() => {
     const m = new Map<string, SellerClaim[]>();
@@ -106,6 +122,12 @@ export default function SellerConsole() {
           </div>
           {ended ? <span className="rounded-full bg-line px-2.5 py-1 text-xs font-bold">ENDED</span> : (
             <span className="flex items-center gap-1.5 rounded-full bg-ink px-2.5 py-1 text-xs font-bold text-white"><span className="anim-live size-1.5 rounded-full bg-hot" />LIVE{viewers ? ` · ${viewers} in room` : ''}</span>
+          )}
+          {chatUI && (
+            <button onClick={() => openInbox()} className="btn relative bg-ink px-3 py-1.5 text-sm text-white">
+              Inbox
+              {totalUnread > 0 && <span className="absolute -right-1 -top-1 grid size-5 place-items-center rounded-full bg-hot text-[11px]">{totalUnread}</span>}
+            </button>
           )}
           <a href={link} target="_blank" rel="noreferrer" className="btn hidden border-2 border-ink px-3 py-1.5 text-sm sm:inline-flex">Open buyer view ↗</a>
         </div>
@@ -176,7 +198,10 @@ export default function SellerConsole() {
                     const it = items.find((i) => i.id === c.itemId)!;
                     return <PayRow key={c.id} c={c} it={it} onConfirm={() => act(() => api.confirm(c.id), `Sold to ${c.buyerName} ✓`)}
                       onReject={() => act(() => api.reject(c.id), 'Moved to next in line')}
-                      onChat={() => { setInboxPeer(c.buyerId); setTab('inbox'); setUnread((u) => ({ ...u, [c.buyerId]: 0 })); }} />;
+                      onChat={() => {
+                        if (chatUI) openInbox(c.buyerId);
+                        else { setInboxPeer(c.buyerId); setTab('inbox'); setUnread((u) => ({ ...u, [c.buyerId]: 0 })); }
+                      }} />;
                   })}
                 </div>
               )}
@@ -188,7 +213,22 @@ export default function SellerConsole() {
                     : <div key={f.id} className={`w-fit rounded-full px-2.5 py-0.5 text-[13px] font-semibold ${f.kind === 'sold' ? 'bg-mint-soft text-mint' : 'bg-hot-soft text-hot-dark'}`}>{f.text}</div>)}
                 </div>
               )}
-              {tab === 'inbox' && (
+              {tab === 'inbox' && chatUI && (
+                <div className="flex min-h-0 flex-1 flex-col">
+                  <button className="btn w-full bg-ink py-3 text-white" onClick={() => openInbox()}>Open full inbox</button>
+                  <p className="mt-2 text-center text-xs text-muted">Powered by Nexconn Chat UI: every order chat, with read receipts, images and history.</p>
+                  <div className="scroll-thin mt-3 min-h-0 flex-1 space-y-1 overflow-y-auto">
+                    {buyers.map((b) => (
+                      <button key={b.id} onClick={() => openInbox(b.id)} className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left hover:bg-paper">
+                        <Avatar id={b.id} name={b.name} size={32} />
+                        <span className="flex-1 font-semibold">{b.name}</span>
+                        {unread[b.id] ? <span className="grid size-5 place-items-center rounded-full bg-hot text-[11px] font-bold text-white">{unread[b.id]}</span> : null}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {tab === 'inbox' && !chatUI && (
                 inboxPeer ? (
                   <div className="flex min-h-0 flex-1 flex-col">
                     <button className="mb-1 flex items-center gap-2 text-left text-sm font-semibold" onClick={() => setInboxPeer(null)}>
@@ -214,6 +254,25 @@ export default function SellerConsole() {
           </div>
         </aside>
       </main>
+
+      {/* Nexconn Chat UI inbox (desktop). Kept mounted so Chat UI keeps its state between opens. */}
+      {chatUI && (
+        <div className={`fixed inset-0 z-50 items-center justify-center p-6 ${inboxOpen ? 'flex' : 'hidden'}`} role="dialog" aria-modal aria-label="Inbox">
+          <button className="absolute inset-0 bg-ink/45 backdrop-blur-[2px]" onClick={() => setInboxOpen(false)} aria-label="Close inbox" />
+          <div className="relative flex h-[min(820px,88dvh)] w-full max-w-6xl flex-col overflow-hidden rounded-[28px] bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-line px-5 py-3">
+              <div>
+                <div className="font-display text-xl font-bold">Inbox</div>
+                <div className="text-xs text-muted">Order chats with your buyers · Nexconn Chat UI</div>
+              </div>
+              <button onClick={() => setInboxOpen(false)} className="grid size-9 place-items-center rounded-full bg-line/60 hover:bg-line" aria-label="Close">
+                <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+              </button>
+            </div>
+            <div ref={inboxBox} className="min-h-0 flex-1" />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

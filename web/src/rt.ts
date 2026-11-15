@@ -181,6 +181,7 @@ let transport: Transport | null = null;
 let transportPromise: Promise<Transport> | null = null;
 let cfgPromise: Promise<AppConfig> | null = null;
 let connected: { userId: string; promise: Promise<void> } | null = null;
+const beforeConnect: (() => Promise<unknown>)[] = [];
 
 // Resolves once the first successful connection is up. Every channel call waits on it, so UI pieces
 // (e.g. an order chat opened while the phone is still connecting) can never hit an uninitialised SDK.
@@ -201,6 +202,12 @@ export const rt = {
       const cfg = await rt.config();
       transportPromise ??= cfg.mode === 'nexconn' && cfg.appKey ? nexconnTransport(cfg) : Promise.resolve(mockTransport());
       transport = await transportPromise;
+      // e.g. Nexconn Chat UI must initialise after NCEngine.initialize() and before connect().
+      if (cfg.mode === 'nexconn') {
+        for (const fn of beforeConnect) {
+          try { await fn(); } catch (e) { console.warn('[claimit] before-connect hook failed', e); }
+        }
+      }
       await transport.connect(token, userId);
       markReady(transport);
     })();
@@ -209,6 +216,9 @@ export const rt = {
     return promise;
   },
   get me() { return connected?.userId ?? null; },
+  /** Run `fn` after the SDK is initialised but before it connects (Nexconn mode only). Register before connect(). */
+  beforeConnect(fn: () => Promise<unknown>) { beforeConnect.push(fn); },
+  async isNexconn() { return (await rt.config()).mode === 'nexconn'; },
   enterOpen: async (id: string) => (await ready()).enterOpen(id),
   exitOpen: async (id: string) => { if (transport) await transport.exitOpen(id); },
   sendOpen: async (id: string, type: string, content: unknown) => (await ready()).sendOpen(id, type, content),

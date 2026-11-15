@@ -66,6 +66,8 @@ export const api = {
     req<SellerSession & { userId: string; token: string }>('POST', '/api/sellers', b),
   sellerSession: () => req<SellerSession & { userId: string; token: string }>('POST', '/api/seller/session', {}, 'seller'),
   sellerDrops: () => req<SellerDropSummary[]>('GET', '/api/seller/drops', undefined, 'seller'),
+  sellerProfiles: (ids: string[]) =>
+    req<{ userId: string; name: string }[]>('GET', `/api/seller/profiles?ids=${encodeURIComponent(ids.join(','))}`, undefined, 'seller'),
   createDrop: (b: { title: string; liveUrl?: string }) => req<{ id: string }>('POST', '/api/seller/drops', b, 'seller'),
   sellerDrop: (id: string) => req<SellerDrop>('GET', `/api/seller/drops/${id}`, undefined, 'seller'),
   updateDrop: (id: string, b: { liveUrl: string }) => req('PATCH', `/api/seller/drops/${id}`, b, 'seller'),
