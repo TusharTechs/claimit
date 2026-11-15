@@ -265,7 +265,7 @@ export function release(claimId: string, reason: 'expired' | 'cancelled' | 'reje
   if (!promoted) return;
   const it = q.item(c.item_id)!;
   publish(c.drop_id, [c.item_id]);
-  const msg = { expired: `Time's up for ${c.buyer_name}`, cancelled: `${c.buyer_name} let go`, rejected: `${c.buyer_name}'s payment wasn't confirmed` }[reason];
+  const msg = { expired: `⏱ ${c.buyer_name} ran out of time`, cancelled: `${c.buyer_name} let it go`, rejected: `${c.buyer_name}'s payment wasn't confirmed` }[reason];
   if (reason !== 'cancelled' || promoted.wasHolder) {
     sendOrderUpdate(claimId, 'seller', reason === 'expired'
       ? `Your hold on ${it.name} expired, so it went to the next person in line.`
@@ -273,7 +273,7 @@ export function release(claimId: string, reason: 'expired' | 'cancelled' | 'reje
       : `You released ${it.name}.`);
   }
   if (promoted.p) {
-    roomEvent(c.drop_id, { kind: 'promoted', itemId: it.id, itemName: it.name, actor: promoted.p.buyer_name, text: `${msg} → ${promoted.p.buyer_name} now holds ${it.name}` });
+    roomEvent(c.drop_id, { kind: 'promoted', itemId: it.id, itemName: it.name, actor: promoted.p.buyer_name, text: `${msg} → ${promoted.p.buyer_name}'s turn for ${it.name}` });
     sendOrder(promoted.p.id);
   } else if (promoted.wasHolder) {
     roomEvent(c.drop_id, { kind: 'released', itemId: it.id, itemName: it.name, text: `${msg} → ${it.name} is up for grabs again!` });

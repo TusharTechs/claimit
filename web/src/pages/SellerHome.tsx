@@ -1,23 +1,25 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, ApiError, sessions, type SellerDropSummary, type SellerSession } from '../api';
-import { Logo, Spinner } from '../components/ui';
+import { ConfirmSheet, Logo, Spinner } from '../components/ui';
 
 export default function SellerHome() {
   const [seller, setSeller] = useState<SellerSession | null>(() => sessions.seller());
+  const [confirmOut, setConfirmOut] = useState(false);
   return (
     <div className="min-h-full">
       <header className="mx-auto flex max-w-3xl items-center justify-between px-4 py-4 sm:px-6">
         <Link to="/"><Logo className="text-xl" /></Link>
         {seller && (
-          <button className="text-sm font-semibold text-muted hover:text-ink" onClick={() => {
-            if (confirm('Log out of this seller account on this device? Save your drop links first.')) { sessions.setSeller(null); setSeller(null); }
-          }}>Log out</button>
+          <button className="text-sm font-semibold text-muted hover:text-ink" onClick={() => setConfirmOut(true)}>Log out</button>
         )}
       </header>
       <main className="mx-auto max-w-3xl px-4 pb-16 sm:px-6">
         {seller ? <Drops seller={seller} onLogout={() => setSeller(null)} /> : <Onboard onDone={(s) => { sessions.setSeller(s); setSeller(s); }} />}
       </main>
+      <ConfirmSheet open={confirmOut} onClose={() => setConfirmOut(false)} title="Log out on this device?" tone="ink"
+        body="You'll need your login link (Use on another device, in any drop) to get back in. Save it before logging out." confirmLabel="Log out"
+        onConfirm={() => { sessions.setSeller(null); setSeller(null); }} />
     </div>
   );
 }

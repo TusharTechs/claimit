@@ -97,6 +97,7 @@ addColumn('drops', 'hold_seconds', 'INTEGER');
 addColumn('buyers', 'phone', 'TEXT');
 addColumn('buyers', 'address', 'TEXT');
 addColumn('buyers', 'pincode', 'TEXT');
+addColumn('buyers', 'is_guest', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('claims', 'ship_phone', 'TEXT');
 addColumn('claims', 'ship_address', 'TEXT');
 addColumn('claims', 'ship_pincode', 'TEXT');

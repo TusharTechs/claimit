@@ -18,7 +18,7 @@ app.use(express.json({ limit: '3mb' }));
 // Tiny fixed-window rate limiter (single process). Lenient: campus Wi-Fi puts many buyers behind one IP.
 const hits = new Map<string, { n: number; reset: number }>();
 const limit = (bucket: string, max: number, windowMs: number) => (req: Request, _res: Response, next: NextFunction) => {
-  const key = `${bucket}:${req.ip}`;
+  const key = `${bucket}:${req.ip}:${bucket === 'claim' ? req.header('x-buyer-id') || '' : ''}`;
   const t = Date.now();
   const cur = hits.get(key);
   if (!cur || cur.reset < t) hits.set(key, { n: 1, reset: t + windowMs });
@@ -63,7 +63,7 @@ function seller(req: Request) {
 function buyer(req: Request) {
   const id = req.header('x-buyer-id') || '';
   const key = req.header('x-buyer-key') || '';
-  const row = db.prepare('SELECT id, name FROM buyers WHERE id = ? AND key = ?').get(id, key) as { id: string; name: string } | undefined;
+  const row = db.prepare('SELECT id, name, is_guest AS isGuest FROM buyers WHERE id = ? AND key = ?').get(id, key) as { id: string; name: string; isGuest: number } | undefined;
   if (!row) throw new AppError(401, 'NO_AUTH', 'Please join the drop first');
   return row;
 }
@@ -241,17 +241,29 @@ app.post('/api/seller/claims/:claimId/reject', h((req) => {
 
 // ---------- buyer ----------
 
-app.post('/api/buyers', limit('join', 40, 10 * 60_000), h(async (req) => {
-  const name = str(req.body.name, 30, 'Your name');
+// Anyone with the link can watch immediately as a guest; a real name is only needed to claim.
+// Generous per-IP limit: Jio/Airtel CGNAT and campus Wi-Fi put many real buyers behind one IP.
+app.post('/api/buyers', limit('join', 600, 10 * 60_000), h(async (req) => {
+  const given = str(req.body.name, 30, 'Your name', false);
+  const guest = given.length < 2;
+  const name = guest ? `Guest ${Math.floor(1000 + Math.random() * 9000)}` : given;
   const id = `b_${rid(10)}`;
   const key = rid(24);
-  db.prepare('INSERT INTO buyers (id, name, key, created) VALUES (?, ?, ?, ?)').run(id, name, key, now());
-  return { id, key, name, token: await nexconn.token(id, name) };
+  db.prepare('INSERT INTO buyers (id, name, key, created, is_guest) VALUES (?, ?, ?, ?, ?)').run(id, name, key, now(), guest ? 1 : 0);
+  return { id, key, name, isGuest: guest, token: await nexconn.token(id, name) };
+}));
+
+app.patch('/api/buyer', h((req) => {
+  const b = buyer(req);
+  const name = str(req.body.name, 30, 'Your name');
+  if (name.length < 2) throw new AppError(400, 'BAD_NAME', 'Name needs at least 2 letters');
+  db.prepare('UPDATE buyers SET name = ?, is_guest = 0 WHERE id = ?').run(name, b.id);
+  return { id: b.id, name, isGuest: false };
 }));
 
 app.post('/api/buyer/session', h(async (req) => {
   const b = buyer(req);
-  return { ...b, token: await nexconn.token(b.id, b.name) };
+  return { id: b.id, name: b.name, isGuest: !!b.isGuest, token: await nexconn.token(b.id, b.name) };
 }));
 
 app.get('/api/drops/:dropId', h(async (req) => {
@@ -267,9 +279,30 @@ app.post('/api/drops/:dropId/join', h((req) => {
   if (!seen) logEvent(d.id, 'join', b.id);
 }));
 
+/** Display names for room senders, resolved server-side so nobody can chat as the seller by faking a name. */
+app.get('/api/drops/:dropId/people', h((req) => {
+  const d = q.drop(String(req.params.dropId));
+  if (!d) throw new AppError(404, 'NO_DROP', 'Drop not found');
+  const s = q.seller(d.seller_id)!;
+  const ids = String(req.query.ids || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 100);
+  const out: Record<string, { name: string; seller?: boolean }> = {};
+  for (const id of ids) {
+    if (id === sellerUserId(s.id)) out[id] = { name: s.shop, seller: true };
+    else {
+      const b = db.prepare('SELECT name FROM buyers WHERE id = ?').get(id) as { name: string } | undefined;
+      if (b) out[id] = { name: b.name };
+    }
+  }
+  return out;
+}));
+
 app.get('/api/drops/:dropId/me', h((req) => myClaims(String(req.params.dropId), buyer(req).id)));
 
-app.post('/api/drops/:dropId/items/:itemId/claim', limit('claim', 60, 60_000), h((req) => claim(String(req.params.dropId), String(req.params.itemId), buyer(req))));
+app.post('/api/drops/:dropId/items/:itemId/claim', limit('claim', 30, 60_000), h((req) => {
+  const b = buyer(req);
+  if (b.isGuest) throw new AppError(409, 'NEED_NAME', 'Tell the seller your name to claim');
+  return claim(String(req.params.dropId), String(req.params.itemId), { id: b.id, name: b.name });
+}));
 
 app.post('/api/claims/:claimId/paid', h((req) => {
   const phone = str(req.body.phone, 20, 'Phone number').replace(/[\s-]/g, '').replace(/^\+?91/, '');

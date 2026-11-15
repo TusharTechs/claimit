@@ -12,7 +12,7 @@
   --color-hot-soft: #ffe6dc;
   --color-sun: #ffb400;
   --color-sun-soft: #fff1cc;
-  --color-mint: #14a06a;
+  --color-mint: #0b8457;
   --color-mint-soft: #dbf5e9;
   --color-plum: #2b1838;
   --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
@@ -67,3 +67,16 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .anim-pop, .anim-rise, .anim-ring, .anim-stamp, .anim-live, .anim-sheet { animation: none; }
 }
+
+/* sonner toasts in brand colours */
+[data-sonner-toast].claimit-toast { background: var(--color-ink); color: #fff; border: none; justify-content: center; }
+[data-sonner-toast].claimit-toast[data-type="success"] { background: var(--color-mint); }
+[data-sonner-toast].claimit-toast.claimit-toast-hot { background: var(--color-hot); }
+[data-sonner-toast].claimit-toast [data-icon] { color: #fff; }
+
+@keyframes shrink { from { transform: scaleX(1) } to { transform: scaleX(0) } }
+@keyframes urgent { 0%, 100% { opacity: 1 } 50% { opacity: 0.55 } }
+.anim-urgent { animation: urgent 0.8s ease-in-out infinite; }
+@keyframes flash { 0% { opacity: .85 } 100% { opacity: 0 } }
+.anim-flash { animation: flash .7s ease-out both; }
+@media (prefers-reduced-motion: reduce) { .anim-urgent, .anim-flash { animation: none; } }

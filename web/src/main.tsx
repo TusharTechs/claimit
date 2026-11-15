@@ -8,10 +8,13 @@ import SellerConsole from './pages/SellerConsole';
 import SellerLogin from './pages/SellerLogin';
 import Room from './pages/Room';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { Toaster } from 'sonner';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
+    <Toaster position="top-center" offset="max(12px, env(safe-area-inset-top))" visibleToasts={2} duration={2800}
+      toastOptions={{ className: 'claimit-toast', style: { fontFamily: 'Inter, system-ui, sans-serif', fontWeight: 600, borderRadius: 999 } }} />
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Landing />} />

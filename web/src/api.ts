@@ -7,7 +7,7 @@ export class ApiError extends Error {
 // ---------- local sessions ----------
 
 export interface SellerSession { id: string; key: string; name: string; shop: string; upi: string }
-export interface BuyerSession { id: string; key: string; name: string }
+export interface BuyerSession { id: string; key: string; name: string; isGuest?: boolean }
 
 const read = <T,>(k: string): T | null => {
   try { const v = localStorage.getItem(k); return v ? (JSON.parse(v) as T) : null; } catch { return null; }
@@ -18,7 +18,10 @@ const write = (k: string, v: unknown) => {
 
 // sessionStorage override lets one browser act as several buyers for testing: open the room with ?as=<anything>
 const buyerSlot = () => {
-  const as = new URLSearchParams(location.search).get('as');
+  // ?as=<slot> lets one browser act as several buyers — local development only, never in production
+  // (it would let one person mint many Nexconn users).
+  const local = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  const as = local ? new URLSearchParams(location.search).get('as') : null;
   return as ? `claimit.buyer.${as}` : 'claimit.buyer';
 };
 
@@ -98,8 +101,11 @@ export const api = {
   confirm: (claimId: string) => req('POST', `/api/seller/claims/${claimId}/confirm`, {}, 'seller'),
   reject: (claimId: string) => req('POST', `/api/seller/claims/${claimId}/reject`, {}, 'seller'),
 
-  createBuyer: (name: string) => req<BuyerSession & { token: string }>('POST', '/api/buyers', { name }),
+  createBuyer: (name?: string) => req<BuyerSession & { token: string }>('POST', '/api/buyers', { name: name ?? '' }),
   buyerSession: () => req<BuyerSession & { token: string }>('POST', '/api/buyer/session', {}, 'buyer'),
+  renameBuyer: (name: string) => req<{ id: string; name: string; isGuest: boolean }>('PATCH', '/api/buyer', { name }, 'buyer'),
+  people: (dropId: string, ids: string[]) =>
+    req<Record<string, { name: string; seller?: boolean }>>('GET', `/api/drops/${dropId}/people?ids=${encodeURIComponent(ids.join(','))}`),
   drop: (id: string) => req<PublicDrop>('GET', `/api/drops/${id}`),
   join: (id: string) => req('POST', `/api/drops/${id}/join`, {}, 'buyer'),
   myClaims: (id: string) => req<MyClaim[]>('GET', `/api/drops/${id}/me`, undefined, 'buyer'),

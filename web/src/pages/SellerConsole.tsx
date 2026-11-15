@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, ApiError, sessions, type SellerClaim, type SellerDrop } from '../api';
 import { rt, type RtMessage } from '../rt';
-import { Avatar, CopyButton, Logo, QR, Sheet, Spinner, StatusChip, Toasts, useToasts } from '../components/ui';
+import { Avatar, ConfirmSheet, CopyButton, ItemThumb, Logo, QR, Sheet, Spinner, StatusChip, useToasts } from '../components/ui';
+import { Play } from 'lucide-react';
 import { DMThread } from '../components/DMThread';
 import { chatUIReady, mountChatUI, openDirect, setupChatUI } from '../chatui';
 import { mmss, resizeImage, rupees, useCountdown, useDebounced } from '../util';
@@ -22,6 +23,9 @@ export default function SellerConsole() {
   const [chatUI, setChatUI] = useState(false); // Nexconn Chat UI inbox available (desktop + Nexconn mode)
   const [inboxOpen, setInboxOpen] = useState(false);
   const [deviceOpen, setDeviceOpen] = useState(false);
+  const [confirmEnd, setConfirmEnd] = useState(false);
+  const [confirmPay, setConfirmPay] = useState<SellerClaim | null>(null);
+  const [confirmSkip, setConfirmSkip] = useState<SellerClaim | null>(null);
   const inboxBox = useRef<HTMLDivElement>(null);
   const toasts = useToasts();
   const seller = sessions.seller();
@@ -98,6 +102,19 @@ export default function SellerConsole() {
     return [...seen.entries()].map(([id, name]) => ({ id, name }));
   }, [data?.claims]);
 
+  // "D" drops the next item — sellers are juggling a live video, so one key matters.
+  const nextDraft = data && data.drop.status !== 'ended' ? [...data.items].filter((i) => i.status === 'draft').sort((a, b) => a.idx - b.idx)[0] : undefined;
+  const dropNextRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (e.key.toLowerCase() !== 'd' || e.metaKey || e.ctrlKey || e.altKey || /INPUT|TEXTAREA|SELECT/.test(t.tagName) || t.isContentEditable || t.closest('nc-chat-ui-app-provider')) return;
+      dropNextRef.current();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   if (!data) return <div className="grid min-h-full place-items-center"><Spinner className="size-8 text-hot" /></div>;
 
   const { drop, items, stats } = data;
@@ -110,10 +127,10 @@ export default function SellerConsole() {
     try { await fn(); if (ok) toasts.push(ok, 'mint'); load(); }
     catch (e) { toasts.push(e instanceof Error ? e.message : 'Failed', 'hot'); }
   };
+  dropNextRef.current = () => { if (nextDraft) act(() => api.dropItem(drop.id, nextDraft.id), `Dropped #${nextDraft.idx} ${nextDraft.name}!`); };
 
   return (
     <div className="min-h-full">
-      <Toasts items={toasts.items} />
       <header className="sticky top-0 z-30 border-b border-line bg-paper/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
           <Link to="/sell"><Logo className="text-lg" /></Link>
@@ -167,26 +184,24 @@ export default function SellerConsole() {
             </div>
           </section>
 
+          {ended && <Recap stats={stats} items={items} claims={data.claims} shop={drop.shop} />}
           {!ended && <AddItem dropId={drop.id} onAdded={load} toast={toasts.push} />}
 
           <section>
             <div className="mb-2 flex items-center justify-between">
               <div className="text-xs font-bold uppercase tracking-wider text-muted">Items ({items.length})</div>
               {!ended && (
-                <button className="text-sm font-semibold text-muted hover:text-hot-dark" onClick={() => {
-                  if (confirm('End this drop? Buyers will no longer be able to claim.')) act(() => api.endDrop(drop.id), 'Drop ended');
-                }}>End drop</button>
+                <button className="text-sm font-semibold text-muted hover:text-hot-dark" onClick={() => setConfirmEnd(true)}>End drop</button>
               )}
             </div>
             <div className="space-y-2.5">
               {items.length === 0 && <p className="rounded-2xl border-2 border-dashed border-line p-6 text-center text-muted">Add your first item above, then hit <b>Drop now</b> when you show it on your live.</p>}
               {[...items].sort((a, b) => sortKey(a) - sortKey(b) || a.idx - b.idx).map((it) => (
-                <ItemRow key={it.id} it={it} claims={claimsByItem.get(it.id) ?? []} ended={ended}
+                <ItemRow key={it.id} it={it} claims={claimsByItem.get(it.id) ?? []} ended={ended} isNext={it.id === nextDraft?.id}
+                  holdSeconds={drop.holdSeconds}
                   onDrop={() => act(() => api.dropItem(drop.id, it.id), `Dropped ${it.name}!`)}
                   onClose={() => act(() => api.closeItem(drop.id, it.id))}
-                  onDelete={() => act(() => api.deleteItem(drop.id, it.id))}
-                  onConfirm={(c) => act(() => api.confirm(c.id), `Sold to ${c.buyerName} ✓`)}
-                  onReject={(c) => act(() => api.reject(c.id), 'Moved to next in line')} />
+                  onDelete={() => act(() => api.deleteItem(drop.id, it.id))} />
               ))}
             </div>
           </section>
@@ -206,8 +221,8 @@ export default function SellerConsole() {
                   {toConfirm.length === 0 && <p className="py-8 text-center text-sm text-muted">When a buyer claims and pays, confirm it here.</p>}
                   {toConfirm.map((c) => {
                     const it = items.find((i) => i.id === c.itemId)!;
-                    return <PayRow key={c.id} c={c} it={it} onConfirm={() => act(() => api.confirm(c.id), `Sold to ${c.buyerName} ✓`)}
-                      onReject={() => act(() => api.reject(c.id), 'Moved to next in line')}
+                    return <PayRow key={c.id} c={c} it={it} holdSeconds={drop.holdSeconds} onConfirm={() => setConfirmPay(c)}
+                      onReject={() => setConfirmSkip(c)}
                       onChat={() => {
                         if (chatUI) openInbox(c.buyerId);
                         else { setInboxPeer(c.buyerId); setTab('inbox'); setUnread((u) => ({ ...u, [c.buyerId]: 0 })); }
@@ -279,6 +294,25 @@ export default function SellerConsole() {
         })()}
       </Sheet>
 
+      {nextDraft && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center px-4 lg:justify-start lg:pl-[max(1rem,calc((100vw-72rem)/2+1rem))]">
+          <button className="btn anim-ring pointer-events-auto bg-hot px-6 py-3.5 text-white shadow-[var(--shadow-pop)]" onClick={() => dropNextRef.current()}>
+            <Play className="size-4 fill-current" /> Drop next: #{nextDraft.idx} {nextDraft.name.length > 28 ? nextDraft.name.slice(0, 27) + '…' : nextDraft.name}
+            <kbd className="ml-1 hidden rounded-md bg-white/25 px-1.5 text-xs font-bold sm:inline">D</kbd>
+          </button>
+        </div>
+      )}
+
+      <ConfirmSheet open={confirmEnd} onClose={() => setConfirmEnd(false)} title="End this drop?" tone="ink"
+        body="Buyers won't be able to claim anything else. Orders already claimed stay as they are." confirmLabel="End drop"
+        onConfirm={() => act(() => api.endDrop(drop.id), 'Drop ended — here is your recap')} />
+      <ConfirmSheet open={!!confirmPay} onClose={() => setConfirmPay(null)} title={`Did ₹${items.find((i) => i.id === confirmPay?.itemId)?.price ?? ''} arrive?`} tone="mint"
+        body={<>Check your UPI app for a payment from <b>{confirmPay?.buyerName}</b>{confirmPay?.utr ? <> with reference <b>{confirmPay.utr}</b></> : null}. Confirming marks the item sold and tells the buyer.</>}
+        confirmLabel="Yes, payment received" onConfirm={() => confirmPay && act(() => api.confirm(confirmPay.id), `Sold to ${confirmPay.buyerName} ✓`)} />
+      <ConfirmSheet open={!!confirmSkip} onClose={() => setConfirmSkip(null)} title={`Skip ${confirmSkip?.buyerName}?`} tone="ink"
+        body="The item goes to the next person in line straight away and they get the order card." confirmLabel="Give it to the next person"
+        onConfirm={() => confirmSkip && act(() => api.reject(confirmSkip.id), 'Moved to the next person in line')} />
+
       {/* Nexconn Chat UI inbox (desktop). Kept mounted so Chat UI keeps its state between opens. */}
       {chatUI && (
         <div className={`fixed inset-0 z-50 items-center justify-center p-6 ${inboxOpen ? 'flex' : 'hidden'}`} role="dialog" aria-modal aria-label="Inbox">
@@ -337,9 +371,8 @@ function AddItem({ dropId, onAdded, toast }: { dropId: string; onAdded: () => vo
   );
 }
 
-function ItemRow({ it, claims, ended, onDrop, onClose, onDelete, onConfirm, onReject }: {
-  it: Item; claims: SellerClaim[]; ended: boolean; onDrop: () => void; onClose: () => void; onDelete: () => void;
-  onConfirm: (c: SellerClaim) => void; onReject: (c: SellerClaim) => void;
+function ItemRow({ it, claims, ended, isNext, holdSeconds, onDrop, onClose, onDelete }: {
+  it: Item; claims: SellerClaim[]; ended: boolean; isNext: boolean; holdSeconds: number; onDrop: () => void; onClose: () => void; onDelete: () => void;
 }) {
   const holder = claims.find((c) => c.status === 'holding' || c.status === 'paying');
   const waiting = claims.filter((c) => c.status === 'waiting');
@@ -348,30 +381,33 @@ function ItemRow({ it, claims, ended, onDrop, onClose, onDelete, onConfirm, onRe
   return (
     <div className={`rounded-2xl border bg-card p-3 ${it.status === 'live' ? 'border-hot' : 'border-line'}`}>
       <div className="flex items-center gap-3">
-        <div className="size-16 shrink-0 overflow-hidden rounded-xl bg-line">{it.image && <img src={it.image} alt="" className="size-full object-cover" />}</div>
+        <div className="size-16 shrink-0 overflow-hidden rounded-xl bg-line"><ItemThumb name={it.name} image={it.image} /></div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2"><span className="text-xs font-bold text-muted">#{it.idx}</span><StatusChip status={it.status} /></div>
           <div className="truncate font-semibold">{it.name}</div>
           <div className="text-sm text-ink-2">{rupees(it.price)}</div>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
-          {(it.status === 'draft' || it.status === 'closed') && !ended && <button className="btn anim-ring bg-hot px-4 py-2 text-sm text-white" onClick={onDrop}>Drop now</button>}
+          {(it.status === 'draft' || it.status === 'closed') && !ended && (
+            <button className={`btn px-4 py-2 text-sm ${isNext ? 'anim-ring bg-hot text-white' : 'border-2 border-hot text-hot-dark'}`} onClick={onDrop}>Drop now</button>
+          )}
           {it.status === 'draft' && <button className="text-xs font-semibold text-muted hover:text-hot-dark" onClick={onDelete}>Delete</button>}
           {it.status === 'live' && <button className="text-xs font-semibold text-muted hover:text-ink" onClick={onClose}>Close</button>}
         </div>
       </div>
       {holder && (
-        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-sun-soft px-3 py-2 text-sm">
-          <Avatar id={holder.buyerId} name={holder.buyerName} size={22} />
-          <span className="font-semibold">{holder.buyerName}</span>
-          <span className="text-[#6b4600]">{holder.status === 'paying' ? `says paid${holder.utr ? ` · UTR ${holder.utr}` : ''}` : `holding · ${mmss(left)}`}</span>
-          <span className="flex-1" />
-          <button className="btn bg-mint px-3 py-1.5 text-xs text-white" onClick={() => onConfirm(holder)}>Payment received</button>
-          <button className="btn bg-white px-3 py-1.5 text-xs" onClick={() => onReject(holder)}>Next in line</button>
+        <div className="mt-3 rounded-xl bg-sun-soft px-3 py-2 text-sm">
+          <div className="flex items-center gap-2">
+            <Avatar id={holder.buyerId} name={holder.buyerName} size={22} />
+            <span className="font-semibold">{holder.buyerName}</span>
+            <span className="text-[#6b4600]">{holder.status === 'paying' ? 'says they paid — confirm in Payments →' : `has ${mmss(left)} to pay`}</span>
+          </div>
+          {holder.status === 'holding' && holder.holdUntil && (
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/80"><div className="h-full rounded-full bg-sun transition-[width] duration-300" style={{ width: `${Math.max(0, Math.min(100, (left / (holdSeconds * 1000)) * 100))}%` }} /></div>
+          )}
         </div>
       )}
-      {holder && <ShipTo c={holder} />}
-      {waiting.length > 0 && <div className="mt-2 text-xs text-muted">Waitlist: {waiting.map((w) => w.buyerName).join(' → ')}</div>}
+      {waiting.length > 0 && <div className="mt-2 text-xs text-muted">Next in line: {waiting.map((w) => w.buyerName).join(' → ')}</div>}
       {winner && <div className="mt-2 text-sm font-semibold text-mint">Sold to {winner.buyerName}</div>}
       {winner && <ShipTo c={winner} />}
     </div>
@@ -388,23 +424,56 @@ function ShipTo({ c }: { c: SellerClaim }) {
   );
 }
 
-function PayRow({ c, it, onConfirm, onReject, onChat }: { c: SellerClaim; it: Item; onConfirm: () => void; onReject: () => void; onChat: () => void }) {
+function PayRow({ c, it, holdSeconds, onConfirm, onReject, onChat }: {
+  c: SellerClaim; it: Item; holdSeconds: number; onConfirm: () => void; onReject: () => void; onChat: () => void;
+}) {
   const left = useCountdown(c.status === 'holding' ? c.holdUntil : null);
+  const paying = c.status === 'paying';
   return (
-    <div className={`rounded-2xl border p-3 ${c.status === 'paying' ? 'border-mint bg-mint-soft/40' : 'border-line'}`}>
+    <div className={`rounded-2xl border p-3 ${paying ? 'border-mint bg-mint-soft/50' : 'border-line'}`}>
       <div className="flex items-center gap-2">
         <Avatar id={c.buyerId} name={c.buyerName} size={28} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold">{c.buyerName} · {it?.name}</div>
-          <div className="text-xs text-ink-2">{rupees(it?.price ?? 0)} · {c.status === 'paying' ? `says paid${c.utr ? ` (UTR ${c.utr})` : ''}` : `waiting for payment · ${mmss(left)}`}</div>
+          <div className="text-xs text-ink-2">{rupees(it?.price ?? 0)} · {paying ? <b className="text-mint">says they paid{c.utr ? ` · ref ${c.utr}` : ''}</b> : <>waiting for payment · <span className="tabular-nums">{mmss(left)}</span></>}</div>
         </div>
       </div>
+      {!paying && c.holdUntil && (
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-line"><div className="h-full rounded-full bg-sun transition-[width] duration-300" style={{ width: `${Math.max(0, Math.min(100, (left / (holdSeconds * 1000)) * 100))}%` }} /></div>
+      )}
       <ShipTo c={c} />
       <div className="mt-2 flex gap-2">
-        <button className="btn flex-1 bg-mint py-2 text-sm text-white" onClick={onConfirm}>Payment received</button>
-        <button className="btn bg-paper px-3 py-2 text-sm" onClick={onReject}>Next</button>
+        {paying
+          ? <button className="btn flex-1 bg-mint py-2 text-sm text-white" onClick={onConfirm}>Payment received</button>
+          : <span className="flex-1 self-center text-xs text-muted">Confirm unlocks when {c.buyerName.split(' ')[0]} taps “I've paid”.</span>}
+        <button className="btn bg-paper px-3 py-2 text-sm" onClick={onReject}>Skip</button>
         <button className="btn bg-paper px-3 py-2 text-sm" onClick={onChat}>Chat</button>
       </div>
     </div>
+  );
+}
+
+function Recap({ stats, items, claims, shop }: { stats: SellerDrop['stats']; items: Item[]; claims: SellerClaim[]; shop: string }) {
+  const sold = items.filter((i) => i.status === 'sold').length;
+  const dropped = items.filter((i) => i.status !== 'draft').length;
+  const raced = new Set(claims.map((c) => c.itemId)).size ? items.filter((i) => claims.filter((c) => c.itemId === i.id).length > 1).length : 0;
+  const paid = claims.filter((c) => c.status === 'paid' && c.paidAt && c.created);
+  const avgPay = paid.length ? Math.round(paid.reduce((a, c) => a + ((c.paidAt as number) - c.created), 0) / paid.length / 1000) : null;
+  const text = `🔥 ${shop}'s drop: ${sold}/${dropped} sold · ${rupees(stats.revenue)} · ${stats.claimAttempts} claim taps · 0 double-claims. Run fair live drops with ClaimIt.`;
+  return (
+    <section className="overflow-hidden rounded-[26px] bg-ink p-5 text-white shadow-[var(--shadow-card)]">
+      <div className="text-xs font-bold uppercase tracking-wider text-white/60">Drop recap</div>
+      <div className="mt-1 font-display text-4xl font-extrabold leading-none">{sold}/{dropped} sold · {rupees(stats.revenue)}</div>
+      <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {[['Buyers joined', stats.viewers], ['Claim taps', stats.claimAttempts], ['Items with a race', raced], ['Avg time to pay', avgPay !== null ? mmss(avgPay * 1000) : '—']].map(([k, v]) => (
+          <div key={k as string} className="rounded-xl bg-white/10 px-3 py-2"><div className="font-display text-xl font-extrabold">{v}</div><div className="text-[11px] text-white/70">{k}</div></div>
+        ))}
+      </div>
+      <p className="mt-3 text-sm text-white/75">Zero double-claims: every item went to exactly one person, in front of everyone.</p>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <CopyButton text={text} label="Copy recap" className="!bg-white !text-ink" />
+        <a className="btn bg-[#25D366] px-4 py-2 text-sm text-white" target="_blank" rel="noreferrer" href={`https://wa.me/?text=${encodeURIComponent(text)}`}>Share on WhatsApp</a>
+      </div>
+    </section>
   );
 }

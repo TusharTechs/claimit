@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ClaimIt">
+  <rect width="512" height="512" rx="116" fill="#FF4A1C"/>
+  <path d="M338 160 A128 128 0 1 0 338 352" fill="none" stroke="#FFF7EE" stroke-width="66" stroke-linecap="round"/>
+  <circle cx="196" cy="256" r="11" fill="#FFF7EE" opacity=".45"/>
+  <circle cx="244" cy="256" r="15" fill="#FFF7EE" opacity=".72"/>
+  <circle cx="298" cy="256" r="20" fill="#FFF7EE"/>
+  <circle cx="396" cy="256" r="48" fill="#17120E"/>
+  <path d="M374 257 L390 273 L419 241" fill="none" stroke="#fff" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
