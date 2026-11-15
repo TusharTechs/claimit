@@ -43,7 +43,7 @@ With no keys set, the app runs in **mock mode**: a local server-sent-events stan
    ```bash
    npm run setup:nexconn
    ```
-4. Run `npm run dev` again. The header of `/api/config` should now say `"mode":"nexconn"`.
+4. Run `npm run dev` again. `/api/config` should now return `"mode":"nexconn"`.
 
 ## Production
 

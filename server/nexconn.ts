@@ -50,6 +50,7 @@ async function call<T = any>(path: string, body: unknown): Promise<T> {
 }
 
 const mock = config.mode === 'mock';
+const countCache = new Map<string, { n: number; at: number }>();
 
 export const nexconn = {
   mode: config.mode,
@@ -99,6 +100,20 @@ export const nexconn = {
       content: JSON.stringify(content), isEchoToSender: 1, shouldPersist: 1,
       ...(pushContent ? { pushContent } : {}),
     });
+  },
+
+  /** Live number of people in the room. Cached briefly: many viewers poll this. */
+  async participantCount(channelId: string): Promise<number | null> {
+    const hit = countCache.get(channelId);
+    if (hit && Date.now() - hit.at < 5000) return hit.n;
+    let n: number | null = null;
+    if (mock) n = mockbus.count(channelId);
+    else {
+      try { n = (await call('/v4/open-channel/get', { channelId })).result?.participantCount ?? null; }
+      catch { n = hit?.n ?? null; }
+    }
+    countCache.set(channelId, { n: n ?? 0, at: Date.now() });
+    return n;
   },
 
   /** One-time app setup: drops/events never get shed; fan chat is shed first under load. */

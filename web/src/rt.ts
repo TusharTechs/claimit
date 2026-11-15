@@ -182,6 +182,12 @@ let transportPromise: Promise<Transport> | null = null;
 let cfgPromise: Promise<AppConfig> | null = null;
 let connected: { userId: string; promise: Promise<void> } | null = null;
 
+// Resolves once the first successful connection is up. Every channel call waits on it, so UI pieces
+// (e.g. an order chat opened while the phone is still connecting) can never hit an uninitialised SDK.
+let markReady: (t: Transport) => void;
+const readyPromise = new Promise<Transport>((r) => { markReady = r; });
+const ready = () => readyPromise;
+
 export const rt = {
   config(): Promise<AppConfig> {
     cfgPromise ??= fetch('/api/config').then((r) => r.json());
@@ -196,17 +202,18 @@ export const rt = {
       transportPromise ??= cfg.mode === 'nexconn' && cfg.appKey ? nexconnTransport(cfg) : Promise.resolve(mockTransport());
       transport = await transportPromise;
       await transport.connect(token, userId);
+      markReady(transport);
     })();
     connected = { userId, promise };
     promise.catch(() => { connected = null; });
     return promise;
   },
   get me() { return connected?.userId ?? null; },
-  enterOpen: (id: string) => transport!.enterOpen(id),
-  exitOpen: (id: string) => transport!.exitOpen(id),
-  sendOpen: (id: string, type: string, content: unknown) => transport!.sendOpen(id, type, content),
-  sendDirect: (peer: string, type: string, content: unknown) => transport!.sendDirect(peer, type, content),
-  history: (peer: string) => transport!.history(peer),
+  enterOpen: async (id: string) => (await ready()).enterOpen(id),
+  exitOpen: async (id: string) => { if (transport) await transport.exitOpen(id); },
+  sendOpen: async (id: string, type: string, content: unknown) => (await ready()).sendOpen(id, type, content),
+  sendDirect: async (peer: string, type: string, content: unknown) => (await ready()).sendDirect(peer, type, content),
+  history: async (peer: string) => (await ready()).history(peer),
   onMessage(fn: MsgFn) { listeners.msg.add(fn); return () => { listeners.msg.delete(fn); }; },
   onMetadata(fn: MetaFn) { listeners.meta.add(fn); return () => { listeners.meta.delete(fn); }; },
   onParticipants(fn: CountFn) { listeners.count.add(fn); return () => { listeners.count.delete(fn); }; },

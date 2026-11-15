@@ -60,6 +60,10 @@ export const mockbus = {
     if (openMembers.get(channelId)?.delete(userId)) this.participants(channelId);
   },
 
+  count(channelId: string) {
+    return openMembers.get(channelId)?.size ?? 0;
+  },
+
   participants(channelId: string) {
     const members = openMembers.get(channelId);
     if (!members) return;

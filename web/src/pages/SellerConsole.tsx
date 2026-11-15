@@ -22,7 +22,11 @@ export default function SellerConsole() {
   const seller = sessions.seller();
 
   const load = useCallback(async () => {
-    try { setData(await api.sellerDrop(dropId)); }
+    try {
+      const d = await api.sellerDrop(dropId);
+      setData(d);
+      if (typeof d.drop.inRoom === 'number' && d.drop.inRoom > 0) setViewers(d.drop.inRoom);
+    }
     catch (e) { if (e instanceof ApiError && (e.status === 401 || e.status === 404)) nav('/sell'); }
   }, [dropId, nav]);
   const refresh = useDebounced(load, 200);

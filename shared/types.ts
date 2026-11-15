@@ -99,6 +99,8 @@ export interface PublicDrop {
   items: Item[];
   state: Record<string, ItemState>;
   drop: DropState;
+  /** People currently in the live room (from Nexconn), if known. */
+  inRoom?: number | null;
 }
 
 export interface MyClaim {

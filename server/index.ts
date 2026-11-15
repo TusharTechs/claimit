@@ -116,8 +116,9 @@ app.post('/api/seller/drops', h(async (req) => {
   return { id };
 }));
 
-app.get('/api/seller/drops/:dropId', h((req) => {
+app.get('/api/seller/drops/:dropId', h(async (req) => {
   const { d } = ownDrop(req);
+  const inRoom = await nexconn.participantCount(d.channel_id);
   const items = q.items(d.id).map(toItem);
   const claims = db.prepare(`SELECT c.id, c.item_id AS itemId, c.buyer_id AS buyerId, c.buyer_name AS buyerName, c.status, c.seq,
       c.created, c.hold_until AS holdUntil, c.utr, c.paid_at AS paidAt
@@ -127,7 +128,7 @@ app.get('/api/seller/drops/:dropId', h((req) => {
   const revenue = (db.prepare(`SELECT COALESCE(SUM(i.price), 0) AS n FROM claims c JOIN items i ON i.id = c.item_id
     WHERE c.drop_id = ? AND c.status = 'paid'`).get(d.id) as { n: number }).n;
   return {
-    drop: publicDrop(d.id),
+    drop: { ...publicDrop(d.id), inRoom },
     items,
     claims,
     stats: {
@@ -194,7 +195,10 @@ app.post('/api/buyer/session', h(async (req) => {
   return { ...b, token: await nexconn.token(b.id, b.name) };
 }));
 
-app.get('/api/drops/:dropId', h((req) => publicDrop(String(req.params.dropId))));
+app.get('/api/drops/:dropId', h(async (req) => {
+  const d = publicDrop(String(req.params.dropId));
+  return { ...d, inRoom: await nexconn.participantCount(d.channelId) };
+}));
 
 app.post('/api/drops/:dropId/join', h((req) => {
   const b = buyer(req);

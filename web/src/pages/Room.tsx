@@ -36,6 +36,7 @@ export default function Room() {
     try {
       const d = await api.drop(dropId);
       setDrop(d);
+      if (typeof d.inRoom === 'number' && d.inRoom > 0) setViewers(d.inRoom);
       setState((cur) => {
         const next = { ...cur };
         for (const [k, v] of Object.entries(d.state)) if (!next[k] || next[k].v <= v.v) next[k] = v;
@@ -313,7 +314,7 @@ function ItemHero({ item, st, me, claims, ended, dropId, isLatest, onClaimed, on
             {holder && (
               <div className="flex items-center gap-2 font-semibold text-[#6b4600]">
                 <Avatar id={holder.id} name={holder.name} size={22} />
-                <span className="min-w-0 flex-1 truncate">{holder.id === me?.id ? 'You' : holder.name} {status === 'paying' ? 'paid · confirming' : 'is holding it'}</span>
+                <span className="min-w-0 flex-1 truncate">{holder.id === me?.id ? (status === 'paying' ? 'You paid · confirming' : "You're holding it") : `${holder.name} ${status === 'paying' ? 'paid · confirming' : 'is holding it'}`}</span>
                 {status === 'held' && <span className="tabular-nums">{mmss(left)}</span>}
               </div>
             )}

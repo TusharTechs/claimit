@@ -6,9 +6,11 @@ import Landing from './pages/Landing';
 import SellerHome from './pages/SellerHome';
 import SellerConsole from './pages/SellerConsole';
 import Room from './pages/Room';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
+    <ErrorBoundary>
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Landing />} />
@@ -18,5 +20,6 @@ createRoot(document.getElementById('root')!).render(
         <Route path="*" element={<Landing />} />
       </Routes>
     </BrowserRouter>
+    </ErrorBoundary>
   </StrictMode>,
 );
