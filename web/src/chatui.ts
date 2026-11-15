@@ -3,6 +3,14 @@
 import type { NCChatUIApplication } from '@nexconn/chatui';
 import { MSG, ORDER_STATUS, type OrderContent, type OrderUpdateContent } from '../../shared/types';
 import { api } from './api';
+import { hueFor, initials } from './util';
+
+/** Same coloured-initials avatar the rest of ClaimIt uses, as an SVG data URL for Chat UI. */
+const avatar = (id: string, name: string) => {
+  const h = hueFor(id);
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='32' fill='hsl(${h} 70% 48%)'/><text x='50%' y='54%' dominant-baseline='middle' text-anchor='middle' font-family='Inter,Arial,sans-serif' font-weight='700' font-size='24' fill='white'>${initials(name).replace(/[<&>]/g, '') || '?'}</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+};
 
 let app: NCChatUIApplication | null = null;
 let root: HTMLElement | null = null;
@@ -68,12 +76,15 @@ export async function setupChatUI(selfId: string, selfName: string) {
       async reqUserProfiles(userIds) {
         const known = userIds.filter((id) => id !== selfId);
         const rows = known.length ? await api.sellerProfiles(known).catch(() => []) : [];
-        return userIds.map((id) => (id === selfId ? { userId: id, name: selfName } : rows.find((r) => r.userId === id) ?? { userId: id, name: 'Buyer' }));
+        return userIds.map((id) => {
+          const name = id === selfId ? selfName : rows.find((r) => r.userId === id)?.name ?? 'Buyer';
+          return { userId: id, name, avatarUrl: avatar(id, name) };
+        });
       },
       async reqGroupProfiles(groupIds) { return groupIds.map((groupId) => ({ groupId, name: 'Group', memberCount: 0 })); },
       async reqGroupMembers() { return []; },
       async reqSystemProfiles(systemIds) { return systemIds.map((targetId) => ({ targetId, name: 'ClaimIt' })) as any; },
-      getDefaultUserProfile: (userId) => ({ userId, name: userId === selfId ? selfName : 'Buyer' }),
+      getDefaultUserProfile: (userId) => ({ userId, name: userId === selfId ? selfName : 'Buyer', avatarUrl: avatar(userId, userId === selfId ? selfName : 'B') }),
     },
   });
   if (!created) throw new Error('Nexconn Chat UI failed to initialise');
@@ -89,6 +100,9 @@ export async function setupChatUI(selfId: string, selfName: string) {
       component: { tagName: 'claimit-order-update', elementClass: OrderUpdateBubble },
     },
   ]);
+  // registerLanguagePack replaces the whole pack, so start from a clone of the built-in English entries.
+  const en = created.cloneLanguageEntries('en_US');
+  if (en) created.registerLanguagePack('en_US', { ...en, 'input.placeholder': 'Reply to your buyer… (Enter to send)' });
   created.ready();
   app = created;
   return app;
@@ -104,6 +118,11 @@ export function mountChatUI(container: HTMLElement) {
     root.style.width = '100%';
     root.style.height = '100%';
     root.style.display = 'block';
+    // Chat UI exposes a few theme variables; fonts are inherited through its shadow roots.
+    root.style.setProperty('--nc-item-selected-bg', '#ffe6dc');
+    root.style.setProperty('--nc-item-hover-bg', '#fff7ee');
+    root.style.setProperty('--nc-item-top-bg', '#fff1cc');
+    root.style.fontFamily = 'Inter, system-ui, sans-serif';
   }
   if (root.parentElement !== container) container.appendChild(root);
   return true;
