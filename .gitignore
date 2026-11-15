@@ -1,0 +1,13 @@
+node_modules
+dist
+data
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+
+# Private research — never commit or push
+nexconn-hackathon-report.md
+research/
+*report*.md

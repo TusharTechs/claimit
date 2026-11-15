@@ -1,0 +1,42 @@
+{
+  "name": "claimit",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Comment-to-claim live drops for social sellers, built on the Nexconn Chat SDK.",
+  "scripts": {
+    "dev": "concurrently -k -n server,web -c blue,magenta \"tsx watch server/index.ts\" \"vite\"",
+    "build": "vite build",
+    "start": "NODE_ENV=production tsx server/index.ts",
+    "setup:nexconn": "tsx server/setup.ts",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "@nexconn/chat": "^26.2.1",
+    "@nexconn/chatui": "^26.2.5",
+    "@nexconn/engine": "^26.2.1",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0",
+    "tsx": "^4.19.2"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.11",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.1",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "tailwindcss": "^4.1.11",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  }
+}
