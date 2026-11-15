@@ -12,7 +12,28 @@ import {
 import type { AppConfig } from '../shared/types.ts';
 
 const app = express();
+app.set('trust proxy', 'loopback'); // behind Caddy on the same host
 app.use(express.json({ limit: '3mb' }));
+
+// Tiny fixed-window rate limiter (single process). Lenient: campus Wi-Fi puts many buyers behind one IP.
+const hits = new Map<string, { n: number; reset: number }>();
+const limit = (bucket: string, max: number, windowMs: number) => (req: Request, _res: Response, next: NextFunction) => {
+  const key = `${bucket}:${req.ip}`;
+  const t = Date.now();
+  const cur = hits.get(key);
+  if (!cur || cur.reset < t) hits.set(key, { n: 1, reset: t + windowMs });
+  else if (++cur.n > max) return next(new AppError(429, 'SLOW_DOWN', 'Too many requests — please wait a moment.'));
+  next();
+};
+setInterval(() => { const t = Date.now(); for (const [k, v] of hits) if (v.reset < t) hits.delete(k); }, 60_000).unref();
+
+const HOLD_CHOICES = [2, 3, 5, 10, 15];
+const holdMinutes = (v: unknown): number | null => {
+  const n = Number(v);
+  if (v === undefined || v === null || v === '') return null;
+  if (!HOLD_CHOICES.includes(n)) throw new AppError(400, 'BAD_HOLD', `Hold time must be one of ${HOLD_CHOICES.join(', ')} minutes`);
+  return n;
+};
 
 type Handler = (req: Request, res: Response) => unknown | Promise<unknown>;
 const h = (fn: Handler) => async (req: Request, res: Response, next: NextFunction) => {
@@ -77,7 +98,7 @@ function saveImage(dataUrl: unknown): string | null {
 
 // ---------- seller ----------
 
-app.post('/api/sellers', h(async (req) => {
+app.post('/api/sellers', limit('seller', 10, 60 * 60_000), h(async (req) => {
   const name = str(req.body.name, 60, 'Your name');
   const shop = str(req.body.shop, 60, 'Shop name');
   const upi = str(req.body.upi, 80, 'UPI ID');
@@ -120,11 +141,12 @@ app.post('/api/seller/drops', h(async (req) => {
   const s = seller(req);
   const title = str(req.body.title, 80, 'Drop title');
   const liveUrl = str(req.body.liveUrl, 300, 'Live link', false) || null;
+  const hold = holdMinutes(req.body.holdMinutes) ?? Math.round(config.holdSeconds / 60);
   const id = rid(8);
   const channelId = `drop_${id}`;
   await nexconn.createOpenChannel(channelId);
-  db.prepare('INSERT INTO drops (id, seller_id, title, channel_id, status, live_url, created) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .run(id, s.id, title, channelId, 'live', liveUrl, now());
+  db.prepare('INSERT INTO drops (id, seller_id, title, channel_id, status, live_url, created, hold_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(id, s.id, title, channelId, 'live', liveUrl, now(), hold * 60);
   return { id };
 }));
 
@@ -133,7 +155,8 @@ app.get('/api/seller/drops/:dropId', h(async (req) => {
   const inRoom = await nexconn.participantCount(d.channel_id);
   const items = q.items(d.id).map(toItem);
   const claims = db.prepare(`SELECT c.id, c.item_id AS itemId, c.buyer_id AS buyerId, c.buyer_name AS buyerName, c.status, c.seq,
-      c.created, c.hold_until AS holdUntil, c.utr, c.paid_at AS paidAt
+      c.created, c.hold_until AS holdUntil, c.utr, c.paid_at AS paidAt,
+      c.ship_phone AS shipPhone, c.ship_address AS shipAddress, c.ship_pincode AS shipPincode
     FROM claims c WHERE c.drop_id = ? ORDER BY c.created DESC`).all(d.id);
   const count = (kind: string, distinct = false) => (db.prepare(
     `SELECT COUNT(${distinct ? 'DISTINCT user_id' : '*'}) AS n FROM events WHERE drop_id = ? AND kind = ?`).get(d.id, kind) as { n: number }).n;
@@ -155,9 +178,33 @@ app.get('/api/seller/drops/:dropId', h(async (req) => {
 
 app.patch('/api/seller/drops/:dropId', h((req) => {
   const { d } = ownDrop(req);
-  const liveUrl = str(req.body.liveUrl, 300, 'Live link', false) || null;
-  db.prepare('UPDATE drops SET live_url = ? WHERE id = ?').run(liveUrl, d.id);
+  if ('liveUrl' in req.body) db.prepare('UPDATE drops SET live_url = ? WHERE id = ?').run(str(req.body.liveUrl, 300, 'Live link', false) || null, d.id);
+  const hold = holdMinutes(req.body.holdMinutes);
+  if (hold) db.prepare('UPDATE drops SET hold_seconds = ? WHERE id = ?').run(hold * 60, d.id);
 }));
+
+/** Orders for shipping: everything paid or awaiting confirmation, as CSV. */
+app.get('/api/seller/drops/:dropId/orders.csv', (req, res, next) => {
+  try {
+    const { d } = ownDrop(req);
+    const rows = db.prepare(`SELECT c.id, i.idx, i.name AS item, i.price, c.buyer_name, c.ship_phone, c.ship_address, c.ship_pincode,
+        c.utr, c.status, c.paid_at, c.created
+      FROM claims c JOIN items i ON i.id = c.item_id WHERE c.drop_id = ? AND c.status IN ('paid','paying') ORDER BY i.idx`).all(d.id) as Record<string, unknown>[];
+    const cell = (v: unknown) => {
+      const t = v === null || v === undefined ? '' : String(v);
+      return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+    };
+    const fmt = (ms: unknown) => (ms ? new Date(Number(ms)).toISOString().replace('T', ' ').slice(0, 16) : '');
+    const lines = [['Order ID', 'Item #', 'Item', 'Price (INR)', 'Buyer', 'Phone', 'Address', 'PIN', 'UTR', 'Status', 'Paid at (UTC)'].join(',')];
+    for (const r of rows) {
+      lines.push([r.id, r.idx, r.item, r.price, r.buyer_name, r.ship_phone, r.ship_address, r.ship_pincode, r.utr,
+        r.status === 'paid' ? 'Payment confirmed' : 'Awaiting confirmation', fmt(r.paid_at)].map(cell).join(','));
+    }
+    res.set('Content-Type', 'text/csv; charset=utf-8')
+      .set('Content-Disposition', `attachment; filename="claimit-orders-${d.id}.csv"`)
+      .send('\uFEFF' + lines.join('\r\n'));
+  } catch (e) { next(e); }
+});
 
 app.post('/api/seller/drops/:dropId/items', h((req) => {
   const { d } = ownDrop(req);
@@ -194,7 +241,7 @@ app.post('/api/seller/claims/:claimId/reject', h((req) => {
 
 // ---------- buyer ----------
 
-app.post('/api/buyers', h(async (req) => {
+app.post('/api/buyers', limit('join', 40, 10 * 60_000), h(async (req) => {
   const name = str(req.body.name, 30, 'Your name');
   const id = `b_${rid(10)}`;
   const key = rid(24);
@@ -222,15 +269,57 @@ app.post('/api/drops/:dropId/join', h((req) => {
 
 app.get('/api/drops/:dropId/me', h((req) => myClaims(String(req.params.dropId), buyer(req).id)));
 
-app.post('/api/drops/:dropId/items/:itemId/claim', h((req) => claim(String(req.params.dropId), String(req.params.itemId), buyer(req))));
+app.post('/api/drops/:dropId/items/:itemId/claim', limit('claim', 60, 60_000), h((req) => claim(String(req.params.dropId), String(req.params.itemId), buyer(req))));
 
-app.post('/api/claims/:claimId/paid', h((req) => buyerMarkPaid(String(req.params.claimId), buyer(req).id, str(req.body.utr, 40, 'UTR', false))));
+app.post('/api/claims/:claimId/paid', h((req) => {
+  const phone = str(req.body.phone, 20, 'Phone number').replace(/[\s-]/g, '').replace(/^\+?91/, '');
+  if (!/^[6-9]\d{9}$/.test(phone)) throw new AppError(400, 'BAD_PHONE', 'Enter a 10-digit mobile number');
+  const address = str(req.body.address, 300, 'Delivery address');
+  if (address.length < 10) throw new AppError(400, 'BAD_ADDRESS', 'Please enter your full delivery address');
+  const pincode = str(req.body.pincode, 6, 'PIN code');
+  if (!/^[1-9]\d{5}$/.test(pincode)) throw new AppError(400, 'BAD_PIN', 'Enter a 6-digit PIN code');
+  return buyerMarkPaid(String(req.params.claimId), buyer(req).id, str(req.body.utr, 40, 'UTR', false), { phone, address, pincode });
+}));
+
+app.get('/api/buyer/shipping', h((req) => {
+  const b = buyer(req);
+  return db.prepare('SELECT phone, address, pincode FROM buyers WHERE id = ?').get(b.id) ?? {};
+}));
 
 app.post('/api/claims/:claimId/release', h((req) => {
   const b = buyer(req);
   const c = q.claim(String(req.params.claimId));
   if (!c || c.buyer_id !== b.id) throw new AppError(404, 'NO_CLAIM', 'Claim not found');
   release(c.id, 'cancelled');
+}));
+
+// ---------- admin: traction numbers for the submission (set ADMIN_KEY in .env) ----------
+
+app.get('/api/admin/stats', h((req) => {
+  const key = process.env.ADMIN_KEY;
+  if (!key || req.header('x-admin-key') !== key) throw new AppError(404, 'NOT_FOUND', 'Not found');
+  const one = (sql: string, ...args: unknown[]) => Number(Object.values(db.prepare(sql).get(...(args as any[])) as object)[0] ?? 0);
+  const day = 86_400_000;
+  const daily = [];
+  for (let i = 6; i >= 0; i--) {
+    const end = now() - i * day; const start = end - day;
+    daily.push({
+      day: new Date(end).toISOString().slice(0, 10),
+      activeBuyers: one(`SELECT COUNT(DISTINCT user_id) FROM events WHERE kind IN ('join','claim_attempt') AND at BETWEEN ? AND ?`, start, end),
+      claims: one(`SELECT COUNT(*) FROM events WHERE kind = 'claim_attempt' AND at BETWEEN ? AND ?`, start, end),
+    });
+  }
+  return {
+    sellers: one('SELECT COUNT(*) FROM sellers'),
+    drops: one('SELECT COUNT(*) FROM drops'),
+    itemsDropped: one(`SELECT COUNT(*) FROM items WHERE status != 'draft'`),
+    buyers: one('SELECT COUNT(*) FROM buyers'),
+    buyersWhoJoinedADrop: one(`SELECT COUNT(DISTINCT user_id) FROM events WHERE kind = 'join'`),
+    claimTaps: one(`SELECT COUNT(*) FROM events WHERE kind = 'claim_attempt'`),
+    ordersPaid: one(`SELECT COUNT(*) FROM claims WHERE status = 'paid'`),
+    gmvInr: one(`SELECT COALESCE(SUM(i.price),0) FROM claims c JOIN items i ON i.id = c.item_id WHERE c.status = 'paid'`),
+    last7Days: daily,
+  };
 }));
 
 // ---------- mock transport (only when no Nexconn keys are set) ----------
@@ -262,7 +351,29 @@ if (config.mode === 'mock') {
 const webDist = path.resolve('dist/web');
 if (fs.existsSync(webDist)) {
   app.use(express.static(webDist, { index: false, maxAge: '1h' }));
-  app.get(/^\/(?!api\/|img\/).*/, (_req, res) => res.sendFile(path.join(webDist, 'index.html')));
+  const indexHtml = fs.readFileSync(path.join(webDist, 'index.html'), 'utf8');
+  const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
+  // Rich link previews when a drop link is pasted into WhatsApp / Instagram / Telegram.
+  app.get('/d/:dropId', (req, res) => {
+    const d = q.drop(String(req.params.dropId));
+    if (!d) return res.type('html').send(indexHtml);
+    const s = q.seller(d.seller_id)!;
+    const img = db.prepare(`SELECT image_id FROM items WHERE drop_id = ? AND image_id IS NOT NULL ORDER BY (status = 'draft'), idx DESC LIMIT 1`).get(d.id) as { image_id: string } | undefined;
+    const base = config.publicUrl || `${req.protocol}://${req.get('host')}`;
+    const title = d.status === 'live' ? `🔴 ${s.shop} is dropping LIVE — first tap wins` : `${s.shop} on ClaimIt`;
+    const desc = `${d.title}. Tap to join the drop: claim items fairly, pay by UPI.`;
+    const tags = [
+      `<meta property="og:type" content="website" />`,
+      `<meta property="og:site_name" content="ClaimIt" />`,
+      `<meta property="og:title" content="${esc(title)}" />`,
+      `<meta property="og:description" content="${esc(desc)}" />`,
+      `<meta property="og:url" content="${esc(`${base}/d/${d.id}`)}" />`,
+      `<meta property="og:image" content="${esc(img ? `${base}/img/${img.image_id}` : `${base}/og.png`)}" />`,
+      `<meta name="twitter:card" content="summary_large_image" />`,
+    ].join('\n    ');
+    res.type('html').send(indexHtml.replace('<title>ClaimIt — fair live drops</title>', `<title>${esc(title)}</title>\n    ${tags}`));
+  });
+  app.get(/^\/(?!api\/|img\/).*/, (_req, res) => res.type('html').send(indexHtml));
 }
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

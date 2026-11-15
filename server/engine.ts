@@ -15,12 +15,14 @@ export class AppError extends Error {
   constructor(public status: number, public code: string, message: string) { super(message); }
 }
 
-interface DropRow { id: string; seller_id: string; title: string; channel_id: string; status: 'live' | 'ended'; live_url: string | null; current_item: string | null }
+interface DropRow { id: string; seller_id: string; title: string; channel_id: string; status: 'live' | 'ended'; live_url: string | null; current_item: string | null; hold_seconds: number | null }
 interface ItemRow { id: string; drop_id: string; name: string; price: number; image_id: string | null; status: ItemStatus; idx: number; dropped_at: number | null; version: number }
 interface ClaimRow { id: string; item_id: string; drop_id: string; buyer_id: string; buyer_name: string; status: ClaimStatus; seq: number; hold_until: number | null; utr: string | null }
 interface SellerRow { id: string; name: string; shop: string; upi: string }
 
 export const sellerUserId = (sellerId: string) => `s_${sellerId}`;
+/** Seconds a claimer has to pay, set per drop by the seller (falls back to HOLD_SECONDS). */
+export const holdSecondsFor = (dropId: string) => q.drop(dropId)?.hold_seconds || config.holdSeconds;
 const imageUrl = (imageId: string | null) => (imageId ? `/img/${imageId}` : null);
 const ACTIVE: ClaimStatus[] = ['holding', 'paying', 'waiting'];
 
@@ -63,7 +65,7 @@ export function publicDrop(dropId: string): PublicDrop {
   for (const it of items) if (it.status !== 'draft') state[it.id] = itemState(it.id);
   return {
     id: d.id, title: d.title, shop: s.shop, sellerId: sellerUserId(s.id), channelId: d.channel_id,
-    status: d.status, liveUrl: d.live_url, holdSeconds: config.holdSeconds,
+    status: d.status, liveUrl: d.live_url, holdSeconds: holdSecondsFor(d.id),
     items: items.filter((i) => i.status !== 'draft').map(toItem),
     state, drop: { status: d.status, current: d.current_item },
   };
@@ -120,7 +122,7 @@ function sendOrder(claimId: string) {
     image: imageUrl(it.image_id), upi: s.upi, shop: s.shop, holdUntil: c.hold_until || now(),
   };
   return enqueue(`dm:${c.buyer_id}`, () =>
-    nexconn.sendDirect(sellerUserId(s.id), c.buyer_id, MSG.ORDER, order, `You got ${it.name}! Pay within ${Math.round(config.holdSeconds / 60)} min to keep it.`));
+    nexconn.sendDirect(sellerUserId(s.id), c.buyer_id, MSG.ORDER, order, `You got ${it.name}! Pay within ${Math.round(holdSecondsFor(d.id) / 60)} min to keep it.`));
 }
 
 function sendOrderUpdate(claimId: string, from: 'seller' | 'buyer', text: string) {
@@ -142,7 +144,7 @@ export function logEvent(dropId: string, kind: string, userId?: string) {
 function promoteNext(itemId: string): ClaimRow | null {
   const next = q.activeClaims(itemId).find((c) => c.status === 'waiting');
   if (next) {
-    db.prepare(`UPDATE claims SET status = 'holding', hold_until = ? WHERE id = ?`).run(now() + config.holdSeconds * 1000, next.id);
+    db.prepare(`UPDATE claims SET status = 'holding', hold_until = ? WHERE id = ?`).run(now() + holdSecondsFor(next.drop_id) * 1000, next.id);
     db.prepare(`UPDATE items SET status = 'held' WHERE id = ?`).run(itemId);
     return q.claim(next.id)!;
   }
@@ -187,7 +189,7 @@ export function claim(dropId: string, itemId: string, buyer: Person) {
     const status: ClaimStatus = holder ? 'waiting' : 'holding';
     db.prepare(`INSERT INTO claims (id, item_id, drop_id, buyer_id, buyer_name, status, seq, created, hold_until)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, itemId, dropId, buyer.id, buyer.name, status, seq, now(),
-      status === 'holding' ? now() + config.holdSeconds * 1000 : null);
+      status === 'holding' ? now() + holdSecondsFor(dropId) * 1000 : null);
     if (status === 'holding') db.prepare(`UPDATE items SET status = 'held' WHERE id = ?`).run(itemId);
     bump(itemId);
     return { claim: q.claim(id)!, fresh: true };
@@ -207,19 +209,25 @@ export function claim(dropId: string, itemId: string, buyer: Person) {
   return myClaims(dropId, buyer.id).find((c) => c.id === result.claim.id)!;
 }
 
-export function buyerMarkPaid(claimId: string, buyerId: string, utr: string) {
+export interface ShipTo { phone: string; address: string; pincode: string }
+
+export function buyerMarkPaid(claimId: string, buyerId: string, utr: string, ship: ShipTo) {
   const c = q.claim(claimId);
   if (!c || c.buyer_id !== buyerId) throw new AppError(404, 'NO_CLAIM', 'Claim not found');
   if (c.status !== 'holding') throw new AppError(409, 'BAD_STATE', 'This claim is no longer on hold');
   tx(() => {
-    db.prepare(`UPDATE claims SET status = 'paying', utr = ? WHERE id = ?`).run(utr.slice(0, 40), claimId);
+    db.prepare(`UPDATE claims SET status = 'paying', utr = ?, ship_phone = ?, ship_address = ?, ship_pincode = ? WHERE id = ?`)
+      .run(utr.slice(0, 40), ship.phone, ship.address, ship.pincode, claimId);
+    // Remember delivery details so the next order is one tap.
+    db.prepare('UPDATE buyers SET phone = ?, address = ?, pincode = ? WHERE id = ?').run(ship.phone, ship.address, ship.pincode, buyerId);
     db.prepare(`UPDATE items SET status = 'paying' WHERE id = ?`).run(c.item_id);
     bump(c.item_id);
   });
   const it = q.item(c.item_id)!;
   publish(c.drop_id, [c.item_id]);
   roomEvent(c.drop_id, { kind: 'paying', itemId: it.id, itemName: it.name, actor: c.buyer_name, text: `${c.buyer_name} paid for ${it.name} — seller is confirming` });
-  sendOrderUpdate(claimId, 'buyer', `I've paid ₹${it.price} for ${it.name}. UTR: ${utr || 'n/a'}`);
+  sendOrderUpdate(claimId, 'buyer',
+    `I've paid ₹${it.price} for ${it.name}. UTR: ${utr || 'n/a'}\nShip to: ${c.buyer_name}, ${ship.address} — ${ship.pincode} · ${ship.phone}`);
 }
 
 export function sellerConfirm(claimId: string, sellerId: string) {

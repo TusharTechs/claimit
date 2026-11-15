@@ -51,7 +51,9 @@ export interface SellerDropSummary { id: string; title: string; status: string; 
 export interface SellerClaim {
   id: string; itemId: string; buyerId: string; buyerName: string; status: MyClaim['status'];
   seq: number; created: number; holdUntil: number | null; utr: string | null; paidAt: number | null;
+  shipPhone: string | null; shipAddress: string | null; shipPincode: string | null;
 }
+export interface Shipping { phone: string; address: string; pincode: string }
 export interface SellerDrop {
   drop: PublicDrop;
   items: Item[];
@@ -68,9 +70,25 @@ export const api = {
   sellerDrops: () => req<SellerDropSummary[]>('GET', '/api/seller/drops', undefined, 'seller'),
   sellerProfiles: (ids: string[]) =>
     req<{ userId: string; name: string }[]>('GET', `/api/seller/profiles?ids=${encodeURIComponent(ids.join(','))}`, undefined, 'seller'),
-  createDrop: (b: { title: string; liveUrl?: string }) => req<{ id: string }>('POST', '/api/seller/drops', b, 'seller'),
+  createDrop: (b: { title: string; liveUrl?: string; holdMinutes?: number }) => req<{ id: string }>('POST', '/api/seller/drops', b, 'seller'),
+  /** Validate a seller id/key pair (used by the "open on another device" link) without storing it first. */
+  sellerLogin: async (id: string, key: string) => {
+    const res = await fetch('/api/seller/session', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-seller-id': id, 'x-seller-key': key }, body: '{}' });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new ApiError(res.status, json.error || 'ERROR', json.message || 'That login link is not valid');
+    return json as SellerSession;
+  },
+  downloadOrders: async (dropId: string) => {
+    const s = sessions.seller();
+    const res = await fetch(`/api/seller/drops/${dropId}/orders.csv`, { headers: s ? { 'x-seller-id': s.id, 'x-seller-key': s.key } : {} });
+    if (!res.ok) throw new ApiError(res.status, 'ERROR', 'Could not download orders');
+    const url = URL.createObjectURL(await res.blob());
+    const a = Object.assign(document.createElement('a'), { href: url, download: `claimit-orders-${dropId}.csv` });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  },
   sellerDrop: (id: string) => req<SellerDrop>('GET', `/api/seller/drops/${id}`, undefined, 'seller'),
-  updateDrop: (id: string, b: { liveUrl: string }) => req('PATCH', `/api/seller/drops/${id}`, b, 'seller'),
+  updateDrop: (id: string, b: { liveUrl?: string; holdMinutes?: number }) => req('PATCH', `/api/seller/drops/${id}`, b, 'seller'),
   addItem: (dropId: string, b: { name: string; price: number; image: string | null }) =>
     req<Item>('POST', `/api/seller/drops/${dropId}/items`, b, 'seller'),
   deleteItem: (dropId: string, itemId: string) => req('DELETE', `/api/seller/drops/${dropId}/items/${itemId}`, undefined, 'seller'),
@@ -86,6 +104,7 @@ export const api = {
   join: (id: string) => req('POST', `/api/drops/${id}/join`, {}, 'buyer'),
   myClaims: (id: string) => req<MyClaim[]>('GET', `/api/drops/${id}/me`, undefined, 'buyer'),
   claim: (dropId: string, itemId: string) => req<MyClaim>('POST', `/api/drops/${dropId}/items/${itemId}/claim`, {}, 'buyer'),
-  markPaid: (claimId: string, utr: string) => req('POST', `/api/claims/${claimId}/paid`, { utr }, 'buyer'),
+  markPaid: (claimId: string, b: Shipping & { utr: string }) => req('POST', `/api/claims/${claimId}/paid`, b, 'buyer'),
+  shipping: () => req<Partial<Shipping>>('GET', '/api/buyer/shipping', undefined, 'buyer'),
   release: (claimId: string) => req('POST', `/api/claims/${claimId}/release`, {}, 'buyer'),
 };

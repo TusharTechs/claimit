@@ -434,7 +434,13 @@ function Orders({ claims, sellerId, shop, onChange, toast }: {
 function OrderCard({ c, onChange, toast }: { c: MyClaim; onChange: () => void; toast: (t: string, tone?: 'hot' | 'mint' | 'ink') => void }) {
   const left = useCountdown(c.status === 'holding' ? c.holdUntil : null);
   const [utr, setUtr] = useState('');
+  const [ship, setShip] = useState({ phone: '', address: '', pincode: '' });
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (c.status !== 'holding') return;
+    api.shipping().then((s) => setShip((cur) => ({ phone: cur.phone || s.phone || '', address: cur.address || s.address || '', pincode: cur.pincode || s.pincode || '' }))).catch(() => {});
+  }, [c.status]);
+  const shipOk = /^[6-9]\d{9}$/.test(ship.phone.replace(/\D/g, '').slice(-10)) && ship.address.trim().length >= 10 && /^[1-9]\d{5}$/.test(ship.pincode);
   const link = upiLink(c.upi, c.shop, c.price, `ClaimIt ${c.itemName}`);
   const isMobile = typeof navigator !== 'undefined' && /Android|iPhone|iPad/i.test(navigator.userAgent);
   const label: Record<string, [string, string]> = {
@@ -466,10 +472,21 @@ function OrderCard({ c, onChange, toast }: { c: MyClaim; onChange: () => void; t
               <p className="text-sm text-ink-2">Scan with any UPI app to pay <b>{c.upi}</b></p>
             </div>
           )}
+          <div className="space-y-2 rounded-xl bg-paper p-2.5">
+            <div className="text-xs font-bold uppercase tracking-wider text-muted">Deliver to</div>
+            <input className="input !py-2 text-sm" type="tel" inputMode="numeric" autoComplete="tel" placeholder="10-digit mobile number" value={ship.phone}
+              onChange={(e) => setShip({ ...ship, phone: e.target.value.replace(/[^\d+ ]/g, '').slice(0, 14) })} />
+            <textarea className="input !py-2 text-sm" rows={2} autoComplete="street-address" placeholder="House / street / area / city" value={ship.address}
+              onChange={(e) => setShip({ ...ship, address: e.target.value.slice(0, 300) })} />
+            <input className="input !py-2 text-sm" inputMode="numeric" autoComplete="postal-code" placeholder="PIN code" value={ship.pincode}
+              onChange={(e) => setShip({ ...ship, pincode: e.target.value.replace(/\D/g, '').slice(0, 6) })} />
+          </div>
           <div className="flex gap-2">
             <input className="input !py-2 text-sm" placeholder="UPI ref / UTR (optional)" value={utr} onChange={(e) => setUtr(e.target.value)} maxLength={40} />
-            <button className="btn shrink-0 bg-ink px-4 text-sm text-white" disabled={busy} onClick={() => act(() => api.markPaid(c.id, utr), 'Sent to seller for confirmation')}>I've paid</button>
+            <button className="btn shrink-0 bg-ink px-4 text-sm text-white" disabled={busy || !shipOk}
+              onClick={() => act(() => api.markPaid(c.id, { utr, ...ship }), 'Sent to seller for confirmation')}>I've paid</button>
           </div>
+          {!shipOk && <p className="text-center text-xs text-muted">Add your phone, address and PIN so the seller can ship.</p>}
           <button className="w-full py-1 text-center text-sm font-semibold text-muted underline-offset-2 hover:underline" disabled={busy}
             onClick={() => act(() => api.release(c.id), 'Released to the next person')}>Let it go</button>
         </div>

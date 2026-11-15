@@ -297,7 +297,7 @@ function AddItem({ dropId, onAdded, toast }: { dropId: string; onAdded: () => vo
       <button type="button" onClick={() => fileRef.current?.click()} className="grid size-20 shrink-0 place-items-center overflow-hidden rounded-2xl border-2 border-dashed border-line bg-paper text-xs font-semibold text-muted">
         {image ? <img src={image} alt="" className="size-full object-cover" /> : <span>+ Photo</span>}
       </button>
-      <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={async (e) => {
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={async (e) => {
         const f = e.target.files?.[0];
         if (f) { try { setImage(await resizeImage(f)); } catch (err) { toast(err instanceof Error ? err.message : 'Bad image', 'hot'); } }
       }} />

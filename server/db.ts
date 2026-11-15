@@ -88,6 +88,19 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS events_drop ON events(drop_id, kind);
 `);
 
+// Additive migrations for existing databases (SQLite has no ADD COLUMN IF NOT EXISTS).
+function addColumn(table: string, column: string, type: string) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+}
+addColumn('drops', 'hold_seconds', 'INTEGER');
+addColumn('buyers', 'phone', 'TEXT');
+addColumn('buyers', 'address', 'TEXT');
+addColumn('buyers', 'pincode', 'TEXT');
+addColumn('claims', 'ship_phone', 'TEXT');
+addColumn('claims', 'ship_address', 'TEXT');
+addColumn('claims', 'ship_pincode', 'TEXT');
+
 export function tx<T>(fn: () => T): T {
   db.exec('BEGIN IMMEDIATE');
   try {
