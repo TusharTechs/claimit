@@ -13,12 +13,15 @@ export interface RtMessage {
   channelId: string; // open channel id, or the peer user id for direct messages
   time: number;
   mine: boolean;
+  /** Nexconn message metadata (expansion), e.g. the order card's live status. */
+  meta?: Record<string, string>;
 }
 
 type MsgFn = (m: RtMessage) => void;
 type MetaFn = (channelId: string, changes: { key: string; value: string | null }[]) => void;
 type CountFn = (channelId: string, count: number) => void;
 type StatusFn = (connected: boolean) => void;
+type MsgMetaFn = (messageId: string, peerId: string, metadata: Record<string, string>) => void;
 
 interface Transport {
   connect(token: string, userId: string): Promise<void>;
@@ -29,12 +32,13 @@ interface Transport {
   history(peerId: string): Promise<RtMessage[]>;
 }
 
-const listeners = { msg: new Set<MsgFn>(), meta: new Set<MetaFn>(), count: new Set<CountFn>(), status: new Set<StatusFn>() };
+const listeners = { msg: new Set<MsgFn>(), meta: new Set<MetaFn>(), count: new Set<CountFn>(), status: new Set<StatusFn>(), msgMeta: new Set<MsgMetaFn>() };
 const emit = {
   msg: (m: RtMessage) => listeners.msg.forEach((f) => f(m)),
   meta: (c: string, ch: { key: string; value: string | null }[]) => listeners.meta.forEach((f) => f(c, ch)),
   count: (c: string, n: number) => listeners.count.forEach((f) => f(c, n)),
   status: (ok: boolean) => listeners.status.forEach((f) => f(ok)),
+  msgMeta: (id: string, peer: string, md: Record<string, string>) => listeners.msgMeta.forEach((f) => f(id, peer, md)),
 };
 
 // ---------- Nexconn transport ----------
@@ -61,9 +65,11 @@ async function nexconnTransport(cfg: AppConfig): Promise<Transport> {
     const kind = ci.channelType === ChannelType.OPEN ? 'open' : 'direct';
     let content: any = m.content;
     if (typeof content === 'string') { try { content = JSON.parse(content); } catch { /* keep */ } }
+    const meta = m.metadata instanceof Map ? Object.fromEntries(m.metadata) : (m.metadata as unknown as Record<string, string> | undefined);
     return {
       id: m.messageId || String(m.clientId), type: m.messageType, content,
       sender: m.senderUserId, kind, channelId: ci.channelId, time: m.sentTime || Date.now(), mine: m.senderUserId === me,
+      ...(meta && Object.keys(meta).length ? { meta } : {}),
     };
   };
 
@@ -71,6 +77,9 @@ async function nexconnTransport(cfg: AppConfig): Promise<Transport> {
     onConnectionStatusChanged({ status }) { emit.status(status === 0 || String(status).toLowerCase() === 'connected'); },
   }));
   NCEngine.addMessageHandler('claimit', new MessageHandler({
+    onMessageMetadataUpdated({ messageId, channelIdentifier, metadata }) {
+      emit.msgMeta(messageId, channelIdentifier.channelId, metadata);
+    },
     onMessageReceived({ messages }) {
       for (const m of messages) {
         const t = m.channelIdentifier.channelType;
@@ -139,6 +148,7 @@ function mockTransport(): Transport {
   const toRt = (m: any): RtMessage => ({
     id: m.messageId, type: m.messageType, content: m.content, sender: m.senderUserId,
     kind: m.channelType, channelId: m.channelId, time: m.sentTime, mine: m.senderUserId === me,
+    ...(m.metadata ? { meta: m.metadata } : {}),
   });
   return {
     connect(t, userId) {
@@ -152,6 +162,7 @@ function mockTransport(): Transport {
           if (p.type === 'message') emit.msg(toRt(p.message));
           else if (p.type === 'metadata') emit.meta(p.channelId, p.changes);
           else if (p.type === 'participants') emit.count(p.channelId, p.count);
+          else if (p.type === 'msgmeta') emit.msgMeta(p.messageId, p.channelId, p.metadata);
         };
       });
     },
@@ -228,6 +239,7 @@ export const rt = {
   onMetadata(fn: MetaFn) { listeners.meta.add(fn); return () => { listeners.meta.delete(fn); }; },
   onParticipants(fn: CountFn) { listeners.count.add(fn); return () => { listeners.count.delete(fn); }; },
   onStatus(fn: StatusFn) { listeners.status.add(fn); return () => { listeners.status.delete(fn); }; },
+  onMessageMeta(fn: MsgMetaFn) { listeners.msgMeta.add(fn); return () => { listeners.msgMeta.delete(fn); }; },
 };
 
 export { CUSTOM_TYPES };

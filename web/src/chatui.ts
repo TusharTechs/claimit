@@ -1,7 +1,7 @@
 // Seller inbox powered by Nexconn Chat UI (@nexconn/chatui). Desktop only: Chat UI does not support portrait mobile.
 // It must be initialised after NCEngine.initialize() and before NCEngine.connect(), so rt runs it as a before-connect hook.
 import type { NCChatUIApplication } from '@nexconn/chatui';
-import { MSG, type OrderContent, type OrderUpdateContent } from '../../shared/types';
+import { MSG, ORDER_STATUS, type OrderContent, type OrderUpdateContent } from '../../shared/types';
 import { api } from './api';
 
 let app: NCChatUIApplication | null = null;
@@ -25,10 +25,15 @@ class OrderBubble extends HTMLElement {
   private render() {
     if (!this._m) return;
     const o = contentOf<OrderContent>(this._m);
+    const raw = (this._m as any)?.message?.metadata ?? (this._m as any)?.metadata;
+    const md: Record<string, string> = raw instanceof Map ? Object.fromEntries(raw) : raw || {};
+    const st = ORDER_STATUS[md.s ?? ''];
+    const chipColors = { sun: ['#fff1cc', '#6b4600'], mint: ['#0b8457', '#fff'], muted: ['#eadfd3', '#3a312a'], hot: ['#ffe6dc', '#d93a10'] } as const;
+    const chip = st ? `<span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:${chipColors[st.tone][0]};color:${chipColors[st.tone][1]}">${esc(st.label)}</span>` : '';
     const img = o.image ? `<img src="${esc(o.image)}" alt="" style="width:48px;height:48px;border-radius:12px;object-fit:cover;flex-shrink:0">` : '';
     this.innerHTML = `
       <div style="font-family:Inter,system-ui,sans-serif;min-width:220px;max-width:280px;padding:12px;border-radius:16px;background:#dbf5e9;border:2px solid rgba(20,160,106,.35);color:#17120e">
-        <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#14a06a">ClaimIt order</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#0b8457">ClaimIt order</div>${chip}</div>
         <div style="display:flex;gap:10px;align-items:center;margin-top:6px">${img}
           <div style="min-width:0">
             <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(o.itemName)}</div>

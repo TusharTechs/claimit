@@ -123,3 +123,13 @@ export interface AppConfig {
 }
 
 export const itemKey = (itemId: string) => `i_${itemId}`;
+
+/** Live status chip for the order card (driven by Nexconn message metadata key `s`). */
+export const ORDER_STATUS: Record<string, { label: string; tone: 'sun' | 'mint' | 'muted' | 'hot' }> = {
+  holding: { label: '⏳ Waiting for payment', tone: 'sun' },
+  paying: { label: '💸 Buyer paid · confirming', tone: 'sun' },
+  paid: { label: '✅ Payment confirmed', tone: 'mint' },
+  expired: { label: '⌛ Hold expired', tone: 'muted' },
+  cancelled: { label: 'Released', tone: 'muted' },
+  rejected: { label: '❌ Payment not confirmed', tone: 'hot' },
+};

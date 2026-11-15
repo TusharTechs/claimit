@@ -5,6 +5,9 @@ import { config } from './config.ts';
 import { db, now, rid } from './db.ts';
 import { nexconn } from './nexconn.ts';
 import { mockbus } from './mockbus.ts';
+import { presence } from './presence.ts';
+import crypto from 'node:crypto';
+import { MSG } from '../shared/types.ts';
 import {
   AppError, buyerMarkPaid, claim, closeItem, dropItem, endDrop, logEvent, myClaims, publicDrop,
   q, release, sellerConfirm, sellerUserId, startExpiryLoop, toItem,
@@ -408,6 +411,50 @@ app.post('/api/claims/:claimId/release', h((req) => {
   release(c.id, 'cancelled');
 }));
 
+// ---------- Nexconn webhooks: presence + pre-message moderation ----------
+// Console → Chat → Chat settings → Webhooks: URL https://<host>/api/nexconn/webhook,
+// events: user:connection_status, open_channel:pre_messaging.
+
+const PAY_SCAM = /([\w.\-]{2,}@[a-z]{2,})|((?:\+?91[\s-]?)?[6-9]\d{4}[\s-]?\d{5})/gi;
+
+/** Room chat runs through this before Nexconn delivers it: mask off-platform payment details and stamp the real name. */
+export function moderateRoomChat(senderId: string, channelId: string, messageType: string, rawContent: string) {
+  if (messageType !== MSG.CHAT) return { pass: 1 };
+  const d = db.prepare('SELECT id, seller_id FROM drops WHERE channel_id = ?').get(channelId) as { id: string; seller_id: string } | undefined;
+  if (!d || senderId === sellerUserId(d.seller_id)) return { pass: 1 };
+  let c: { text?: string; name?: string } = {};
+  try { c = JSON.parse(rawContent); } catch { return { pass: 0, extra: 'bad_content' }; }
+  const real = (db.prepare('SELECT name FROM buyers WHERE id = ?').get(senderId) as { name: string } | undefined)?.name ?? 'Buyer';
+  const text = String(c.text ?? '').slice(0, 200);
+  const masked = text.replace(PAY_SCAM, '•••');
+  if (masked !== text) logEvent(d.id, 'scam_masked', senderId);
+  if (masked === text && c.name === real) return { pass: 1 };
+  return { pass: 1, replaceContent: JSON.stringify({ text: masked, name: real, ...(masked !== text ? { masked: true } : {}) }) };
+}
+
+app.post('/api/nexconn/webhook', express.json({ limit: '1mb' }), (req, res) => {
+  const { appKey, appSecret } = config.nexconn;
+  const nonce = req.header('Nonce') || '';
+  const ts = req.header('Timestamp') || '';
+  const sig = req.header('Signature') || '';
+  const expected = crypto.createHash('sha1').update(appSecret + nonce + ts).digest('hex');
+  if (!appKey || req.header('AppKey') !== appKey || sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
+    return res.status(401).json({ error: 'bad signature' });
+  }
+  const type = String(req.body?.type || '');
+  const data: any[] = Array.isArray(req.body?.data) ? req.body.data : [];
+  if (type === 'user:connection_status') {
+    for (const e of data) presence.set(String(e.userId), String(e.status) === '0', Number(e.time) || Date.now());
+    return res.json({ ok: true });
+  }
+  if (type === 'open_channel:pre_messaging') {
+    const e = data[0] || {};
+    return res.json(moderateRoomChat(String(e.userId), String(e.channelId), String(e.messageType), String(e.content ?? '')));
+  }
+  if (type.endsWith(':pre_messaging')) return res.json({ pass: 1 });
+  res.json({ ok: true });
+});
+
 // ---------- admin: traction numbers for the submission (set ADMIN_KEY in .env) ----------
 
 app.get('/api/admin/stats', h((req) => {
@@ -434,6 +481,7 @@ app.get('/api/admin/stats', h((req) => {
     ordersPaid: one(`SELECT COUNT(*) FROM claims WHERE status = 'paid'`),
     gmvInr: one(`SELECT COALESCE(SUM(i.price),0) FROM claims c JOIN items i ON i.id = c.item_id WHERE c.status = 'paid'`),
     joinsViaShares: one(`SELECT COUNT(*) FROM events WHERE kind = 'join' AND ref IS NOT NULL`),
+    scamMessagesMasked: one(`SELECT COUNT(*) FROM events WHERE kind = 'scam_masked'`),
     follows: one('SELECT COUNT(*) FROM follows'),
     proWaitlist: one('SELECT COUNT(*) FROM pro_waitlist'),
     feedback: db.prepare('SELECT role, rating, text, quote_ok AS quoteOk, created FROM feedback ORDER BY created DESC LIMIT 50').all(),
@@ -454,9 +502,15 @@ if (config.mode === 'mock') {
   });
   app.post('/api/mock/enter', h((req) => mockbus.enter(str(req.body.channelId, 64, 'channelId'), mockUser(req))));
   app.post('/api/mock/exit', h((req) => mockbus.exit(str(req.body.channelId, 64, 'channelId'), mockUser(req))));
-  app.post('/api/mock/send-open', h((req) => ({
-    messageId: mockbus.sendOpen(str(req.body.channelId, 64, 'channelId'), mockUser(req), str(req.body.type, 32, 'type'), req.body.content),
-  })));
+  app.post('/api/mock/send-open', h((req) => {
+    // Same moderation path as Nexconn's pre-message webhook.
+    const channelId = str(req.body.channelId, 64, 'channelId');
+    const type = str(req.body.type, 32, 'type');
+    const verdict = moderateRoomChat(mockUser(req), channelId, type, JSON.stringify(req.body.content ?? {})) as { pass: number; replaceContent?: string };
+    if (!verdict.pass) return { blocked: true };
+    const content = verdict.replaceContent ? JSON.parse(verdict.replaceContent) : req.body.content;
+    return { messageId: mockbus.sendOpen(channelId, mockUser(req), type, content) };
+  }));
   app.post('/api/mock/send-direct', h((req) => ({
     messageId: mockbus.sendDirect(mockUser(req), str(req.body.to, 64, 'to'), str(req.body.type, 32, 'type'), req.body.content),
   })));

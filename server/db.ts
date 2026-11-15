@@ -102,6 +102,7 @@ addColumn('claims', 'ship_phone', 'TEXT');
 addColumn('claims', 'ship_address', 'TEXT');
 addColumn('claims', 'ship_pincode', 'TEXT');
 addColumn('events', 'ref', 'TEXT');
+addColumn('claims', 'order_msg_id', 'TEXT');
 db.exec(`
 CREATE TABLE IF NOT EXISTS follows (
   seller_id TEXT NOT NULL REFERENCES sellers(id),

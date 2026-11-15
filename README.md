@@ -12,16 +12,30 @@ Thousands of small sellers in India run Instagram and YouTube lives and WhatsApp
 
 | Feature | Nexconn capability |
 |---|---|
-| Live drop room for any number of viewers | **Open channel** (server-created per drop, joined from the Web Chat SDK) |
-| Live claim queue every viewer sees update at once | **Open channel metadata (KV)**, written by the server arbiter, `onMetadataChanged` on clients |
-| Product drops and claim events land even when chat floods | **Priority message types** (`CI:Drop`, `CI:Event`) plus server `priority: 2` sends |
-| Fan chatter is shed first under load | **Low-priority message type** (`CI:Chat`) |
-| Order card, payment updates, buyer and seller chat | **Direct channel**: custom `CI:Order` / `CI:OrderUpd` messages via the Server API, plus text via the SDK |
-| Seller inbox on desktop: every order chat with history, images and files | **Nexconn Chat UI** (`@nexconn/chatui`), with custom Web Component bubbles that render ClaimIt order cards inside Chat UI |
-| Live viewer count | Open channel participant events |
-| Identity | Server-issued **access tokens** (`/v4/auth/access-token/issue`). The App Secret never reaches the browser. |
+| Live drop room for any number of viewers | **Open channel**, created server-side for each drop and joined through the Web Chat SDK |
+| Live claim queue that every viewer sees update at the same moment | **Open channel metadata (KV)**, written by the server arbiter with per-item versions; clients use `onMetadataChanged` |
+| Drops and claim events always get through, fan chat is dropped first under load | **Priority message types** (`CI:Drop`, `CI:Event`) plus a **low-priority type** (`CI:Chat`), registered by `npm run setup:nexconn`; server sends use `priority: 2` |
+| Anti-scam room chat: phone numbers and UPI IDs masked, sender names forced to their real value | **Pre-message webhook** (`open_channel:pre_messaging`): Nexconn holds each message until our server passes or rewrites it |
+| Presence-aware queue: offline buyers are skipped, and a holder who leaves loses the hold early | **User connection-status webhook** (`user:connection_status`) |
+| Order card whose status updates in place (waiting for payment, then paid, then confirmed) | **Direct channel** custom message `CI:Order`, sent with `hasMetadata`; the server updates it through **message metadata** (`/v4/channel-type/message/metadata/set`), and clients use `onMessageMetadataUpdated` |
+| Buyer and seller order chat | Direct channel: text through the SDK, plus `CI:OrderUpd` status messages |
+| Seller inbox on desktop | **Nexconn Chat UI** (`@nexconn/chatui`), with custom Web Component bubbles that render live order cards |
+| Followers notified when a shop opens a new drop | Direct channel batch send (up to 1,000 recipients per call) |
+| Live viewer count | `/v4/open-channel/get` (server, cached for 5s) plus participant events |
+| Identity | Server-issued **access tokens**. The App Secret never reaches the browser. |
 
-The **claim arbiter** runs on the app server. Every state change is one synchronous SQLite transaction in a single Node process, so two buyers who tap in the same millisecond can never both win. After each commit, the server publishes the new queue to the open channel's metadata. It also sends a priority event to the room and an order card to the winner's direct channel.
+The **claim arbiter** runs on the app server. Every state change is a single synchronous SQLite transaction in one Node process, so two buyers who tap in the same millisecond can never both win. After each commit, the server publishes the new queue to the open channel's metadata, sends a priority event to the room, and sends or updates the winner's order card.
+
+**Webhook setup** (Console → Chat → Chat settings → Webhooks):
+
+- URL: `https://<your-host>/api/nexconn/webhook`
+- Events: `user:connection_status` and `open_channel:pre_messaging`
+- Requests are verified with `sha1(AppSecret + Nonce + Timestamp)`.
+
+**Notes on scope:**
+
+- Payment is a direct UPI transfer to the seller. The buyer taps "I've paid" and adds an optional transaction ID, then the seller confirms in one tap. ClaimIt never holds money.
+- Low-priority shedding is a Nexconn server behaviour under load (more than about 40 messages per 200 ms in a room). ClaimIt configures it but doesn't simulate floods.
 
 ## Run locally
 

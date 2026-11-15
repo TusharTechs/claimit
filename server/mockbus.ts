@@ -1,8 +1,10 @@
 // Local stand-in for Nexconn used only when no App Key/Secret is configured.
 // It mimics the three things ClaimIt uses: open-channel messages, open-channel metadata, and direct messages.
 import type { Response } from 'express';
+import { presence } from './presence.ts';
 
 export interface MockMessage {
+  metadata?: Record<string, string>;
   messageId: string;
   messageType: string;
   content: unknown;
@@ -35,12 +37,14 @@ export const mockbus = {
     res.write(': connected\n\n');
     if (!streams.has(userId)) streams.set(userId, new Set());
     streams.get(userId)!.add(res);
+    presence.set(userId, true);
     const ping = setInterval(() => res.write(': ping\n\n'), 20000);
     res.on('close', () => {
       clearInterval(ping);
       streams.get(userId)?.delete(res);
       if (!streams.get(userId)?.size) {
         streams.delete(userId);
+        presence.set(userId, false);
         for (const [channelId, members] of openMembers) {
           if (members.delete(userId)) this.participants(channelId);
         }
@@ -91,8 +95,8 @@ export const mockbus = {
     return metadata.get(channelId) || {};
   },
 
-  sendDirect(fromUserId: string, toUserId: string, messageType: string, content: unknown) {
-    const base = { messageId: nextId(), messageType, content, senderUserId: fromUserId, channelType: 'direct' as const, sentTime: Date.now() };
+  sendDirect(fromUserId: string, toUserId: string, messageType: string, content: unknown, metadata?: Record<string, string>) {
+    const base = { messageId: nextId(), messageType, content, senderUserId: fromUserId, channelType: 'direct' as const, sentTime: Date.now(), ...(metadata ? { metadata } : {}) };
     const key = pairKey(fromUserId, toUserId);
     const hist = directHistory.get(key) || [];
     hist.push({ ...base, channelId: '' });
@@ -100,6 +104,13 @@ export const mockbus = {
     push(toUserId, { type: 'message', message: { ...base, channelId: fromUserId } });
     push(fromUserId, { type: 'message', message: { ...base, channelId: toUserId } });
     return base.messageId;
+  },
+
+  setMessageMetadata(messageId: string, a: string, b: string, metadata: Record<string, string>) {
+    const m = (directHistory.get(pairKey(a, b)) || []).find((x) => x.messageId === messageId);
+    if (m) m.metadata = { ...(m.metadata || {}), ...metadata };
+    push(a, { type: 'msgmeta', messageId, channelId: b, metadata });
+    push(b, { type: 'msgmeta', messageId, channelId: a, metadata });
   },
 
   history(userId: string, peerId: string): MockMessage[] {

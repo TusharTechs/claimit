@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { rt, type RtMessage } from '../rt';
-import { MSG, type OrderContent, type OrderUpdateContent } from '../../../shared/types';
+import { MSG, ORDER_STATUS, type OrderContent, type OrderUpdateContent } from '../../../shared/types';
 import { rupees } from '../util';
 
 /** 1:1 Direct channel between a buyer and the seller: order cards, status updates and free text. */
@@ -23,7 +23,12 @@ export function DMThread({ peerId, peerName, onActivity, compact = false }: {
       setMsgs((x) => (x.some((y) => y.id === m.id) ? x : [...x, m]));
       activity.current?.(m);
     });
-    return () => { alive = false; off(); };
+    // The order card's status chip updates in place when the server changes its Nexconn message metadata.
+    const offMeta = rt.onMessageMeta((messageId, peer, md) => {
+      if (peer !== peerId) return;
+      setMsgs((x) => x.map((m) => (m.id === messageId ? { ...m, meta: { ...(m.meta || {}), ...md } } : m)));
+    });
+    return () => { alive = false; off(); offMeta(); };
   }, [peerId]);
 
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }); }, [msgs.length]);
@@ -57,9 +62,14 @@ export function DMThread({ peerId, peerName, onActivity, compact = false }: {
 function Bubble({ m }: { m: RtMessage }) {
   if (m.type === MSG.ORDER) {
     const o = m.content as OrderContent;
+    const st = ORDER_STATUS[m.meta?.s ?? ''];
+    const chip = st ? { sun: 'bg-sun-soft text-[#6b4600]', mint: 'bg-mint text-white', muted: 'bg-line text-ink-2', hot: 'bg-hot-soft text-hot-dark' }[st.tone] : '';
     return (
       <div className="anim-rise mx-auto w-full max-w-xs rounded-2xl border-2 border-mint/40 bg-mint-soft p-3">
-        <div className="text-xs font-bold uppercase tracking-wider text-mint">Order card</div>
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-xs font-bold uppercase tracking-wider text-mint">Order card</div>
+          {st && <span key={m.meta?.s} className={`anim-pop rounded-full px-2 py-0.5 text-[11px] font-bold ${chip}`}>{st.label}</span>}
+        </div>
         <div className="mt-1 flex items-center gap-3">
           {o.image && <img src={o.image} alt="" className="size-12 rounded-xl object-cover" />}
           <div className="min-w-0">

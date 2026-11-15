@@ -5,6 +5,7 @@
 import { config } from './config.ts';
 import { db, now, rid, tx } from './db.ts';
 import { nexconn } from './nexconn.ts';
+import { presence } from './presence.ts';
 import {
   MSG, itemKey,
   type ClaimStatus, type DropState, type EventContent, type Item, type ItemState, type ItemStatus,
@@ -17,7 +18,7 @@ export class AppError extends Error {
 
 interface DropRow { id: string; seller_id: string; title: string; channel_id: string; status: 'live' | 'ended'; live_url: string | null; current_item: string | null; hold_seconds: number | null }
 interface ItemRow { id: string; drop_id: string; name: string; price: number; image_id: string | null; status: ItemStatus; idx: number; dropped_at: number | null; version: number }
-interface ClaimRow { id: string; item_id: string; drop_id: string; buyer_id: string; buyer_name: string; status: ClaimStatus; seq: number; hold_until: number | null; utr: string | null }
+interface ClaimRow { id: string; item_id: string; drop_id: string; buyer_id: string; buyer_name: string; status: ClaimStatus; seq: number; hold_until: number | null; utr: string | null; order_msg_id: string | null }
 interface SellerRow { id: string; name: string; shop: string; upi: string }
 
 export const sellerUserId = (sellerId: string) => `s_${sellerId}`;
@@ -121,11 +122,27 @@ function sendOrder(claimId: string) {
     claimId: c.id, dropId: d.id, itemId: it.id, itemName: it.name, price: it.price,
     image: imageUrl(it.image_id), upi: s.upi, shop: s.shop, holdUntil: c.hold_until || now(),
   };
-  return enqueue(`dm:${c.buyer_id}`, () =>
-    nexconn.sendDirect(sellerUserId(s.id), c.buyer_id, MSG.ORDER, order, `You got ${it.name}! Pay within ${Math.round(holdSecondsFor(d.id) / 60)} min to keep it.`));
+  return enqueue(`dm:${c.buyer_id}`, async () => {
+    const id = await nexconn.sendDirect(sellerUserId(s.id), c.buyer_id, MSG.ORDER, order,
+      `You got ${it.name}! Pay within ${Math.round(holdSecondsFor(d.id) / 60)} min to keep it.`, undefined, { s: 'holding' });
+    if (id) db.prepare('UPDATE claims SET order_msg_id = ? WHERE id = ?').run(id, claimId);
+  });
+}
+
+/** The order card is one message whose status updates in place (Nexconn message metadata), on both sides. */
+function updateOrderCard(claimId: string) {
+  const c = q.claim(claimId);
+  if (!c) return;
+  const sellerId = sellerUserId(q.drop(c.drop_id)!.seller_id);
+  return enqueue(`dm:${c.buyer_id}`, async () => {
+    const fresh = q.claim(claimId)!;
+    if (!fresh.order_msg_id) return;
+    await nexconn.setMessageMetadata(fresh.order_msg_id, sellerId, fresh.buyer_id, { s: fresh.status, t: String(now()) });
+  });
 }
 
 function sendOrderUpdate(claimId: string, from: 'seller' | 'buyer', text: string) {
+  updateOrderCard(claimId);
   const c = q.claim(claimId)!;
   const d = q.drop(c.drop_id)!;
   const seller = sellerUserId(d.seller_id);
@@ -141,8 +158,22 @@ export function logEvent(dropId: string, kind: string, userId?: string) {
 // ---------- transitions ----------
 
 /** Promote the first waiting claim to holder, or reopen the item. Must run inside a transaction. */
+/** Offline buyers skipped while promoting (presence from Nexconn's connection-status webhook). */
+let skippedOffline: string[] = [];
+
 function promoteNext(itemId: string): ClaimRow | null {
-  const next = q.activeClaims(itemId).find((c) => c.status === 'waiting');
+  const waiting = q.activeClaims(itemId).filter((c) => c.status === 'waiting');
+  // Presence-aware: pass over people who have left the room, so the item doesn't stall for minutes on a ghost.
+  let next: ClaimRow | undefined;
+  for (const w of waiting) {
+    if (presence.isOffline(w.buyer_id)) {
+      db.prepare(`UPDATE claims SET status = 'expired' WHERE id = ?`).run(w.id);
+      skippedOffline.push(w.buyer_name);
+      continue;
+    }
+    next = w;
+    break;
+  }
   if (next) {
     db.prepare(`UPDATE claims SET status = 'holding', hold_until = ? WHERE id = ?`).run(now() + holdSecondsFor(next.drop_id) * 1000, next.id);
     db.prepare(`UPDATE items SET status = 'held' WHERE id = ?`).run(itemId);
@@ -250,14 +281,15 @@ export function sellerConfirm(claimId: string, sellerId: string) {
 }
 
 /** Seller rejects a payment claim, or buyer releases, or hold expires: the item moves to the next person in line. */
-export function release(claimId: string, reason: 'expired' | 'cancelled' | 'rejected') {
+export function release(claimId: string, reason: 'expired' | 'cancelled' | 'rejected' | 'offline') {
   const c = q.claim(claimId);
   if (!c) return;
+  skippedOffline = [];
   const promoted = tx(() => {
     const cur = q.claim(claimId)!;
     if (!ACTIVE.includes(cur.status)) return undefined;
     const wasHolder = cur.status === 'holding' || cur.status === 'paying';
-    db.prepare('UPDATE claims SET status = ? WHERE id = ?').run(reason, claimId);
+    db.prepare('UPDATE claims SET status = ? WHERE id = ?').run(reason === 'offline' ? 'expired' : reason, claimId);
     const p = wasHolder ? promoteNext(c.item_id) : null;
     bump(c.item_id);
     return { wasHolder, p };
@@ -265,9 +297,12 @@ export function release(claimId: string, reason: 'expired' | 'cancelled' | 'reje
   if (!promoted) return;
   const it = q.item(c.item_id)!;
   publish(c.drop_id, [c.item_id]);
-  const msg = { expired: `⏱ ${c.buyer_name} ran out of time`, cancelled: `${c.buyer_name} let it go`, rejected: `${c.buyer_name}'s payment wasn't confirmed` }[reason];
+  const skipped = skippedOffline.length ? ` (skipped ${skippedOffline.join(', ')} — offline)` : '';
+  const msg = { expired: `⏱ ${c.buyer_name} ran out of time`, offline: `📴 ${c.buyer_name} left the room`, cancelled: `${c.buyer_name} let it go`, rejected: `${c.buyer_name}'s payment wasn't confirmed` }[reason] + skipped;
   if (reason !== 'cancelled' || promoted.wasHolder) {
-    sendOrderUpdate(claimId, 'seller', reason === 'expired'
+    sendOrderUpdate(claimId, 'seller', reason === 'offline'
+      ? `You left the drop, so ${it.name} went to the next person in line. Come back for the next drop!`
+      : reason === 'expired'
       ? `Your hold on ${it.name} expired, so it went to the next person in line.`
       : reason === 'rejected' ? `We couldn't confirm your payment for ${it.name}. Message us if this is a mistake.`
       : `You released ${it.name}.`);
@@ -306,6 +341,14 @@ export function startExpiryLoop() {
     const expired = db.prepare(`SELECT id FROM claims WHERE status = 'holding' AND hold_until < ?`).all(now()) as { id: string }[];
     for (const e of expired) {
       try { release(e.id, 'expired'); } catch (err) { console.error('expiry', err); }
+    }
+    // A holder who has been offline for 60s+ can't be paying: pass the item on (if others are waiting).
+    const held = db.prepare(`SELECT c.id, c.buyer_id, c.item_id FROM claims c WHERE c.status = 'holding' AND c.hold_until > ?`).all(now() + 15_000) as { id: string; buyer_id: string; item_id: string }[];
+    for (const h of held) {
+      if (!presence.isOffline(h.buyer_id, 60_000)) continue;
+      const others = q.activeClaims(h.item_id).some((x) => x.status === 'waiting');
+      if (!others) continue;
+      try { release(h.id, 'offline'); } catch (err) { console.error('offline release', err); }
     }
   }, 1000);
 }

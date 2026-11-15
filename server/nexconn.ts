@@ -93,13 +93,25 @@ export const nexconn = {
   },
 
   /** 1:1 message (order card, order updates). Echoed to the sender so the seller's inbox shows it too. */
-  async sendDirect(fromUserId: string, toUserId: string, messageType: string, content: unknown, pushContent?: string, toMany?: string[]) {
+  /** Returns the message id for single-recipient sends (used to update the message's metadata later). */
+  async sendDirect(fromUserId: string, toUserId: string, messageType: string, content: unknown, pushContent?: string, toMany?: string[],
+    metadata?: Record<string, string>): Promise<string | null> {
     const to = toMany?.length ? toMany : [toUserId];
-    if (mock) { for (const t of to) mockbus.sendDirect(fromUserId, t, messageType, content); return; }
-    await call('/v4/direct-channel/message/send', {
+    if (mock) { let id: string | null = null; for (const t of to) id = mockbus.sendDirect(fromUserId, t, messageType, content, metadata); return id; }
+    const res = await call('/v4/direct-channel/message/send', {
       fromUserId, toUserIds: to, messageType,
       content: JSON.stringify(content), isEchoToSender: 1, shouldPersist: 1,
       ...(pushContent ? { pushContent } : {}),
+      ...(metadata ? { hasMetadata: true, metadata } : {}),
+    });
+    return res?.result?.messageIds?.[0]?.messageId ?? null;
+  },
+
+  /** Update a sent 1:1 message's metadata in place (e.g. the order card's live status). */
+  async setMessageMetadata(messageId: string, operatorId: string, peerId: string, metadata: Record<string, string>) {
+    if (mock) return mockbus.setMessageMetadata(messageId, operatorId, peerId, metadata);
+    await call('/v4/channel-type/message/metadata/set', {
+      messageId, userId: operatorId, channelType: 1, channelId: peerId, metadata, isEchoToSender: 1,
     });
   },
 
