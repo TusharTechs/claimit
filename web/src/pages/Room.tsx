@@ -160,6 +160,8 @@ export default function Room() {
           const c = m.content as ChatContent;
           wanted.current.add(m.sender); resolvePeople();
           pushFeed({ id: m.id, kind: 'chat', sender: m.sender, text: c.text, fallbackName: c.name });
+        } else if ((m.type === MSG.EVENT || m.type === MSG.DROP) && m.sender !== drop.sellerId) {
+          return; // only the shop (our server) may post drops and claim events — ignore anything else
         } else if (m.type === MSG.EVENT) {
           const ev = m.content as EventContent;
           pushFeed({ id: m.id, kind: 'event', ev });
@@ -203,6 +205,7 @@ export default function Room() {
     if (!me) return;
     if (me.isGuest) { setNameFor(item.id); return; }
     claimedHere.current.add(item.id); // the order DM can arrive before this response — don't treat it as a promotion
+    setTimeout(() => claimedHere.current.delete(item.id), 20_000);
     try {
       const before = stateRef.current[item.id];
       const c = await api.claim(dropId, item.id);
@@ -266,6 +269,12 @@ export default function Room() {
           {activeClaims.length > 0 && <span className="absolute -right-0.5 -top-0.5 grid size-5 place-items-center rounded-full bg-hot text-[11px] font-bold text-white">{activeClaims.length}</span>}
         </button>
       </header>
+
+      {drop.demo && (
+        <div className="mx-4 mb-2 rounded-2xl bg-plum px-3 py-2 text-center text-sm font-semibold text-white">
+          🤖 Live demo — the other buyers are bots. Tap Claim fast to beat them!
+        </div>
+      )}
 
       <AnimatePresence>
         {connected && !online && (
@@ -335,7 +344,7 @@ export default function Room() {
           <ClaimBar item={current} st={curState} myClaim={myClaim} me={me} disabled={!connected}
             onClaim={() => doClaim(current)} onPay={() => setOrdersOpen(true)} />
         )}
-        <ChatInput disabled={!connected || ended || !me} onSend={async (text) => {
+        <ChatInput disabled={!connected || ended || !me} ended={ended} onSend={async (text) => {
           if (!me) return;
           const sent = await rt.sendOpen(drop.channelId, MSG.CHAT, { text, name: me.name });
           if (sent) pushFeed({ id: sent.id, kind: 'chat', sender: me.id, text, fallbackName: me.name });
@@ -373,6 +382,7 @@ export default function Room() {
   // Claim right after the name sheet (session state has just changed).
   async function doClaimAs(item: Item) {
     claimedHere.current.add(item.id);
+    setTimeout(() => claimedHere.current.delete(item.id), 20_000);
     try {
       const c = await api.claim(dropId, item.id);
       setClaims((x) => [c, ...x.filter((y) => y.id !== c.id)]);
@@ -491,6 +501,9 @@ function ClaimBar({ item, st, myClaim, me, disabled, onClaim, onPay }: {
   const waitCount = st?.waitlist.length ?? 0;
   const myPos = myClaim?.status === 'waiting' ? (st?.waitlist.findIndex((w) => w.id === me?.id) ?? -1) + 1 || myClaim.position : 0;
   const run = async () => { setBusy(true); try { await onClaim(); } finally { setBusy(false); } };
+  if (disabled && !myClaim) {
+    return <div className="btn mb-2.5 w-full bg-line py-4 font-display text-xl text-ink-2"><Spinner /> Connecting to the live room…</div>;
+  }
 
   let tone: 'hot' | 'ink' | 'mint' | 'sun' | 'muted' = 'muted';
   let label: React.ReactNode = '';
@@ -520,7 +533,13 @@ function ClaimBar({ item, st, myClaim, me, disabled, onClaim, onPay }: {
 
 function Feed({ feed, people, meId, sellerId }: { feed: FeedEntry[]; people: People; meId?: string; sellerId: string }) {
   const end = useRef<HTMLDivElement>(null);
-  useEffect(() => { end.current?.scrollIntoView({ block: 'end', behavior: 'smooth' }); }, [feed.length]);
+  const lastId = feed[feed.length - 1]?.id;
+  useEffect(() => {
+    // Follow new activity only if the viewer is already near the bottom — never yank the item card out of view.
+    const el = end.current; const scroller = el?.closest('.overflow-y-auto') as HTMLElement | null;
+    if (!el || !scroller) return;
+    if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 140) el.scrollIntoView({ block: 'end', behavior: 'smooth' });
+  }, [lastId]);
   return (
     <div className="space-y-1.5 px-4 pb-3 pt-4" aria-live="polite" aria-label="Live room activity">
       {feed.length === 0 && <div className="py-4 text-center text-sm text-muted">Claims and chat show up here live. Ask about size or colour 👇</div>}
@@ -552,12 +571,12 @@ function Feed({ feed, people, meId, sellerId }: { feed: FeedEntry[]; people: Peo
   );
 }
 
-function ChatInput({ onSend, disabled }: { onSend: (t: string) => Promise<void>; disabled: boolean }) {
+function ChatInput({ onSend, disabled, ended }: { onSend: (t: string) => Promise<void>; disabled: boolean; ended?: boolean }) {
   const [text, setText] = useState('');
   return (
     <form className="flex gap-2" onSubmit={async (e) => { e.preventDefault(); const t = text.trim(); if (!t) return; setText(''); await onSend(t).catch(() => {}); }}>
       <label className="sr-only" htmlFor="room-chat">Message the room</label>
-      <input id="room-chat" className="input !rounded-full !py-2.5" placeholder={disabled ? 'Connecting…' : 'Ask about size, colour…'} value={text} onChange={(e) => setText(e.target.value)} maxLength={200} disabled={disabled} />
+      <input id="room-chat" className="input !rounded-full !py-2.5" placeholder={ended ? 'This drop has ended' : disabled ? 'Connecting…' : 'Ask about size, colour…'} value={text} onChange={(e) => setText(e.target.value)} maxLength={200} disabled={disabled} />
       <button className="btn size-11 shrink-0 bg-ink text-white" disabled={disabled || !text.trim()} aria-label="Send">
         <svg viewBox="0 0 24 24" className="size-5" fill="currentColor"><path d="M3.4 20.4 21 12 3.4 3.6l.1 6.5L15 12 3.5 13.9z" /></svg>
       </button>
@@ -601,6 +620,27 @@ function EndedCard({ shop, shopId, sold, total, toast }: { shop: string; shopId:
         <Link to="/sell" className="btn bg-white/10 px-5 py-3 text-white">Run your own drop <ChevronRight className="size-4" /></Link>
       </div>
     </div>
+  );
+}
+
+function ReportProblem({ c, toast }: { c: MyClaim; toast: Toast }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState('');
+  return (
+    <>
+      <button className="mt-2 w-full text-center text-xs font-semibold text-muted underline-offset-2 hover:underline" onClick={() => setOpen(true)}>Report a problem with this order</button>
+      <Sheet open={open} onClose={() => setOpen(false)} title="Report a problem">
+        <form className="pb-2" onSubmit={async (e) => {
+          e.preventDefault();
+          try { await api.feedback({ role: 'buyer', rating: 0, text: `[order ${c.id}] ${text}` }); toast('Thanks — the ClaimIt team will look into it', 'mint'); setOpen(false); setText(''); }
+          catch { toast('Could not send', 'hot'); }
+        }}>
+          <label htmlFor={`rp-${c.id}`} className="block text-sm font-semibold">What went wrong with “{c.itemName}”?</label>
+          <textarea id={`rp-${c.id}`} data-autofocus className="input mt-1" rows={3} maxLength={480} value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. Paid 2 days ago, no reply from the seller" />
+          <button className="btn mt-3 w-full bg-ink py-3 text-white" disabled={text.trim().length < 5}>Send report</button>
+        </form>
+      </Sheet>
+    </>
   );
 }
 
@@ -701,10 +741,10 @@ function OrderCard({ c, buyerName, onChange, toast }: { c: MyClaim; buyerName: s
     setBusy(true);
     try { await fn(); toast(ok, 'mint'); onChange(); } catch (e) { toast(e instanceof Error ? e.message : 'Failed', 'hot'); } finally { setBusy(false); }
   };
-  const stepAt = c.status === 'holding' ? 1 : c.status === 'paying' ? 2 : c.status === 'paid' ? 3 : 0;
+  const stepAt = c.status === 'holding' ? 1 : c.status === 'paying' ? 2 : c.status === 'paid' ? (c.shippedAt ? 4 : 3) : 0;
   const label: Record<string, [string, string]> = {
     holding: ['Pay to keep it', 'text-mint'], paying: ['Seller is confirming your payment', 'text-[#8a5a00]'], waiting: [`#${c.position} in line`, 'text-[#8a5a00]'],
-    paid: ['Payment confirmed — preparing to ship', 'text-mint'], expired: ['Hold expired', 'text-muted'], cancelled: ['Released', 'text-muted'], rejected: ['Payment not confirmed', 'text-hot-dark'],
+    paid: [c.shippedAt ? `📦 Shipped${c.tracking ? ` · ${c.tracking}` : ''}` : 'Payment confirmed — preparing to ship', 'text-mint'], expired: ['Hold expired', 'text-muted'], cancelled: ['Released', 'text-muted'], rejected: ['Payment not confirmed', 'text-hot-dark'],
   };
   const [text, cls] = label[c.status] || [c.status, ''];
 
@@ -726,7 +766,7 @@ function OrderCard({ c, buyerName, onChange, toast }: { c: MyClaim; buyerName: s
         <div className="mt-3 space-y-2.5">
           {/* ① Delivery */}
           <section className="rounded-xl bg-paper p-3">
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-muted"><Truck className="size-4" /> 1 · Deliver to</div>
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-muted"><Truck className="size-4" /> Deliver to</div>
             {!editing && shipOk ? (
               <div className="mt-1.5 flex items-start gap-2 text-sm">
                 <div className="min-w-0 flex-1"><b>{buyerName}</b>, {ship.address} — {ship.pincode} · {phoneDigits}</div>
@@ -750,8 +790,8 @@ function OrderCard({ c, buyerName, onChange, toast }: { c: MyClaim; buyerName: s
 
           {/* ② Pay */}
           <section className={`rounded-xl p-3 ${shipOk ? 'bg-mint-soft/60' : 'bg-paper opacity-60'}`}>
-            <div className="text-xs font-bold uppercase tracking-wider text-muted">2 · Pay {c.shop}</div>
-            <a href={shipOk ? link : undefined} aria-disabled={!shipOk} onClick={() => shipOk && setPayTapped(true)}
+            <div className="text-xs font-bold uppercase tracking-wider text-muted">Pay {c.shop}</div>
+            <a href={shipOk ? link : undefined} aria-disabled={!shipOk} onClick={() => { if (!shipOk) return; setPayTapped(true); api.payingApp(c.id).catch(() => {}); }}
               className={`btn mt-2 w-full py-3 text-white ${shipOk ? 'bg-mint' : 'pointer-events-none bg-muted'}`}>Pay {rupees(c.price)} with any UPI app</a>
             {!isMobile && shipOk && (
               <div className="mt-2 flex items-center gap-3 rounded-xl bg-white p-2">
@@ -763,7 +803,7 @@ function OrderCard({ c, buyerName, onChange, toast }: { c: MyClaim; buyerName: s
 
           {/* ③ Confirm */}
           <section className="rounded-xl bg-paper p-3">
-            <div className="text-xs font-bold uppercase tracking-wider text-muted">3 · Tell {c.shop} you've paid</div>
+            <div className="text-xs font-bold uppercase tracking-wider text-muted">Then tell {c.shop} you've paid</div>
             <label className="mt-2 block text-sm font-semibold" htmlFor={`txn-${c.id}`}>UPI transaction ID <span className="font-normal text-muted">(optional, speeds up confirmation)</span></label>
             <input id={`txn-${c.id}`} className="input mt-1 !py-2 text-sm" placeholder="12-digit ref from your UPI app" value={txn} onChange={(e) => setTxn(e.target.value)} maxLength={40} />
             <button ref={paidRef} className={`btn mt-2 w-full py-3 text-white ${payTapped ? 'anim-ring bg-ink' : 'bg-ink'}`} disabled={busy || !shipOk}
@@ -780,6 +820,7 @@ function OrderCard({ c, buyerName, onChange, toast }: { c: MyClaim; buyerName: s
         </div>
       )}
       {c.status === 'paid' && <PaidExtras c={c} toast={toast} />}
+      {['paying', 'paid', 'rejected'].includes(c.status) && <ReportProblem c={c} toast={toast} />}
       {c.status === 'waiting' && (
         <button className="mt-2 w-full py-1 text-center text-sm font-semibold text-muted hover:underline" disabled={busy}
           onClick={() => act(() => api.release(c.id), 'Left the line')}>Leave the line</button>

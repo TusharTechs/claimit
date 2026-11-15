@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import './index.css';
 import Landing from './pages/Landing';
 import SellerHome from './pages/SellerHome';
@@ -26,6 +26,7 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/sell/login" element={<SellerLogin />} />
         <Route path="/sell/:dropId" element={<SellerConsole />} />
         <Route path="/d/:dropId" element={<Room />} />
+        <Route path="/demo" element={<Navigate to="/d/demo" replace />} />
         <Route path="/s/:sellerId" element={<Shop />} />
         <Route path="/pricing" element={<Pricing />} />
         <Route path="/impact" element={<Impact />} />

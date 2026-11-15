@@ -26,26 +26,58 @@ export default function SellerHome() {
 }
 
 function Onboard({ onDone }: { onDone: (s: SellerSession) => void }) {
-  const [f, setF] = useState({ name: '', shop: '', upi: '' });
+  const [f, setF] = useState({ name: '', shop: '', upi: '', phone: '' });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [created, setCreated] = useState<(SellerSession & { phone: string | null }) | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  if (created) {
+    // Force a backup of the login link: the shop lives behind this key, so a cleared browser must never lose it.
+    const link = `${location.origin}/sell/login#${created.id}.${created.key}`;
+    const msg = `My ClaimIt seller login for ${created.shop} (keep private): ${link}`;
+    return (
+      <div className="mx-auto max-w-md pt-6">
+        <div className="text-5xl">🎉</div>
+        <h1 className="mt-2 font-display text-4xl font-extrabold leading-tight">{created.shop} is ready</h1>
+        <p className="mt-2 text-ink-2">One last thing: save your private login link, so you can open your shop on any phone or laptop — even if this browser is cleared.</p>
+        <div className="mt-5 space-y-2">
+          <a className="btn w-full bg-[#25D366] py-3.5 text-white" target="_blank" rel="noreferrer" onClick={() => setSaved(true)}
+            href={created.phone ? `https://wa.me/91${created.phone}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`}>
+            WhatsApp it to myself
+          </a>
+          <button className="btn w-full bg-white py-3 shadow-sm" onClick={async () => { try { await navigator.clipboard.writeText(link); setSaved(true); } catch { /* ignore */ } }}>
+            {saved ? 'Saved ✓' : 'Copy login link'}
+          </button>
+        </div>
+        <button className="btn mt-6 w-full bg-ink py-3.5 text-lg text-white" disabled={!saved} onClick={() => onDone(created)}>
+          {saved ? 'Go to my shop' : 'Save the link first'}
+        </button>
+        <button className="mt-3 w-full text-center text-sm text-muted underline" onClick={() => onDone(created)}>Skip (not recommended)</button>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-md pt-6">
       <h1 className="font-display text-4xl font-extrabold leading-tight">Set up your shop</h1>
       <p className="mt-2 text-ink-2">Takes 20 seconds. Buyers pay you directly over UPI — ClaimIt never touches your money.</p>
       <form className="mt-6 space-y-3" onSubmit={async (e) => {
         e.preventDefault(); setBusy(true); setErr('');
-        try { const s = await api.createSeller(f); onDone({ id: s.id, key: s.key, name: s.name, shop: s.shop, upi: s.upi }); }
-        catch (e2) { setErr(e2 instanceof Error ? e2.message : 'Something went wrong'); setBusy(false); }
+        try { const s = await api.createSeller(f); setCreated({ id: s.id, key: s.key, name: s.name, shop: s.shop, upi: s.upi, phone: (s as any).phone ?? null }); }
+        catch (e2) { setErr(e2 instanceof Error ? e2.message : 'Something went wrong'); } finally { setBusy(false); }
       }}>
         <label className="block"><span className="mb-1 block text-sm font-semibold">Your name</span>
-          <input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Asha" required maxLength={60} /></label>
+          <input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Asha" required maxLength={60} autoComplete="given-name" /></label>
         <label className="block"><span className="mb-1 block text-sm font-semibold">Shop name (shown to buyers)</span>
           <input className="input" value={f.shop} onChange={(e) => setF({ ...f, shop: e.target.value })} placeholder="Asha's Thrift Closet" required maxLength={60} /></label>
         <label className="block"><span className="mb-1 block text-sm font-semibold">UPI ID for payments</span>
           <input className="input" value={f.upi} onChange={(e) => setF({ ...f, upi: e.target.value.trim() })} placeholder="asha@okicici" required maxLength={80} autoCapitalize="none" /></label>
+        <label className="block"><span className="mb-1 block text-sm font-semibold">Your WhatsApp number <span className="font-normal text-muted">(to save your login link)</span></span>
+          <input className="input" type="tel" inputMode="numeric" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value.replace(/[^\d+ ]/g, '').slice(0, 14) })} placeholder="98765 43210" autoComplete="tel" /></label>
         {err && <p className="text-sm font-semibold text-hot-dark">{err}</p>}
         <button className="btn w-full bg-hot py-3.5 text-lg text-white" disabled={busy}>{busy ? <Spinner /> : 'Create my shop'}</button>
+        <p className="text-center text-xs text-muted">By continuing you agree to our <Link to="/terms" className="underline">terms</Link> and <Link to="/privacy" className="underline">privacy policy</Link>.</p>
       </form>
     </div>
   );
@@ -75,6 +107,10 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
       <div className="mt-3 flex flex-wrap gap-2 text-sm">
         <Link to={`/s/${seller.id}`} className="btn bg-white px-4 py-2 shadow-sm">Your shop page ↗</Link>
         <Link to="/pricing" className="btn bg-white px-4 py-2 shadow-sm">Pricing</Link>
+        <button className="btn bg-white px-4 py-2 shadow-sm" onClick={async () => {
+          try { const d = await api.practiceDrop(); nav(`/sell/${d.id}`); toast('Practice drop ready — open the buyer view in another tab and try claiming'); }
+          catch (e) { toast.error(e instanceof Error ? e.message : 'Could not create practice drop'); }
+        }}>🎯 Try a practice drop</button>
       </div>
 
       <form className="mt-6 rounded-[26px] border border-line bg-card p-5 shadow-[var(--shadow-card)]" onSubmit={async (e) => {

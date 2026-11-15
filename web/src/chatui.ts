@@ -3,6 +3,7 @@
 import type { NCChatUIApplication } from '@nexconn/chatui';
 import { MSG, ORDER_STATUS, type OrderContent, type OrderUpdateContent } from '../../shared/types';
 import { api } from './api';
+import { rt } from './rt';
 import { hueFor, initials } from './util';
 
 /** Same coloured-initials avatar the rest of ClaimIt uses, as an SVG data URL for Chat UI. */
@@ -26,15 +27,32 @@ function contentOf<T>(m: any): T {
 
 /** Order card bubble, rendered by Chat UI as <nc-c-claimit-order>. */
 class OrderBubble extends HTMLElement {
+  /** Mounted bubbles by message id, so metadata updates re-render them even if Chat UI doesn't. */
+  static live = new Map<string, Set<OrderBubble>>();
   private _m: unknown;
-  set message(m: unknown) { this._m = m; this.render(); }
+  private _id = '';
+  private _md: Record<string, string> = {};
+  set message(m: unknown) {
+    this._m = m;
+    this.track(String((m as any)?.messageId ?? (m as any)?.message?.messageId ?? ''));
+    this.render();
+  }
   get message() { return this._m; }
-  connectedCallback() { this.render(); }
+  connectedCallback() { this.track(this._id); this.render(); }
+  disconnectedCallback() { OrderBubble.live.get(this._id)?.delete(this); }
+  applyMeta(md: Record<string, string>) { this._md = { ...this._md, ...md }; this.render(); }
+  private track(id: string) {
+    if (!id) return;
+    if (this._id && this._id !== id) OrderBubble.live.get(this._id)?.delete(this);
+    this._id = id;
+    if (!OrderBubble.live.has(id)) OrderBubble.live.set(id, new Set());
+    OrderBubble.live.get(id)!.add(this);
+  }
   private render() {
     if (!this._m) return;
     const o = contentOf<OrderContent>(this._m);
     const raw = (this._m as any)?.message?.metadata ?? (this._m as any)?.metadata;
-    const md: Record<string, string> = raw instanceof Map ? Object.fromEntries(raw) : raw || {};
+    const md: Record<string, string> = { ...(raw instanceof Map ? Object.fromEntries(raw) : raw || {}), ...this._md };
     const st = ORDER_STATUS[md.s ?? ''];
     const chipColors = { sun: ['#fff1cc', '#6b4600'], mint: ['#0b8457', '#fff'], muted: ['#eadfd3', '#3a312a'], hot: ['#ffe6dc', '#d93a10'] } as const;
     const chip = st ? `<span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:${chipColors[st.tone][0]};color:${chipColors[st.tone][1]}">${esc(st.label)}</span>` : '';
@@ -104,6 +122,7 @@ export async function setupChatUI(selfId: string, selfName: string) {
   const en = created.cloneLanguageEntries('en_US');
   if (en) created.registerLanguagePack('en_US', { ...en, 'input.placeholder': 'Reply to your buyer… (Enter to send)' });
   created.ready();
+  rt.onMessageMeta((messageId, _peer, md) => OrderBubble.live.get(messageId)?.forEach((el) => el.applyMeta(md)));
   app = created;
   return app;
 }

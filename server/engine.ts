@@ -22,6 +22,8 @@ interface ClaimRow { id: string; item_id: string; drop_id: string; buyer_id: str
 interface SellerRow { id: string; name: string; shop: string; upi: string }
 
 export const sellerUserId = (sellerId: string) => `s_${sellerId}`;
+/** Demo-room bot buyers: never messaged, never connected to Nexconn. */
+const isBot = (buyerId: string) => buyerId.startsWith('bot_');
 /** Seconds a claimer has to pay, set per drop by the seller (falls back to HOLD_SECONDS). */
 export const holdSecondsFor = (dropId: string) => q.drop(dropId)?.hold_seconds || config.holdSeconds;
 const imageUrl = (imageId: string | null) => (imageId ? `/img/${imageId}` : null);
@@ -44,7 +46,8 @@ export function toItem(r: ItemRow): Item {
 export function itemState(itemId: string): ItemState {
   const item = q.item(itemId)!;
   const active = q.activeClaims(itemId);
-  const holder = active.find((c) => c.status === 'holding' || c.status === 'paying');
+  const holder = active.find((c) => c.status === 'holding' || c.status === 'paying')
+    ?? (item.status === 'sold' ? (db.prepare(`SELECT * FROM claims WHERE item_id = ? AND status = 'paid' LIMIT 1`).get(itemId) as ClaimRow | undefined) : undefined);
   const total = (db.prepare('SELECT COUNT(*) AS n FROM claims WHERE item_id = ?').get(itemId) as { n: number }).n;
   return {
     id: itemId,
@@ -68,7 +71,7 @@ export function publicDrop(dropId: string): PublicDrop {
     id: d.id, title: d.title, shop: s.shop, sellerId: sellerUserId(s.id), channelId: d.channel_id,
     status: d.status, liveUrl: d.live_url, holdSeconds: holdSecondsFor(d.id),
     items: items.filter((i) => i.status !== 'draft').map(toItem),
-    state, drop: { status: d.status, current: d.current_item },
+    state, drop: { status: d.status, current: d.current_item }, demo: d.id === 'demo',
   };
 }
 
@@ -83,6 +86,7 @@ export function myClaims(dropId: string, buyerId: string): MyClaim[] {
     return {
       id: c.id, itemId: c.item_id, itemName: c.item_name, price: c.price, image: imageUrl(c.image_id),
       status: c.status, position, holdUntil: c.hold_until, upi: s.upi, shop: s.shop,
+      shippedAt: (c as any).shipped_at ?? null, tracking: (c as any).tracking ?? null,
     };
   });
 }
@@ -115,6 +119,7 @@ function roomEvent(dropId: string, ev: EventContent) {
 
 function sendOrder(claimId: string) {
   const c = q.claim(claimId)!;
+  if (isBot(c.buyer_id)) return;
   const it = q.item(c.item_id)!;
   const d = q.drop(c.drop_id)!;
   const s = q.seller(d.seller_id)!;
@@ -126,6 +131,23 @@ function sendOrder(claimId: string) {
     const id = await nexconn.sendDirect(sellerUserId(s.id), c.buyer_id, MSG.ORDER, order,
       `You got ${it.name}! Pay within ${Math.round(holdSecondsFor(d.id) / 60)} min to keep it.`, undefined, { s: 'holding' });
     if (id) db.prepare('UPDATE claims SET order_msg_id = ? WHERE id = ?').run(id, claimId);
+    else console.warn('[order card] no messageId returned; live status updates disabled for claim', claimId);
+  });
+}
+
+/** Seller marks a paid order as shipped (optional courier + tracking). */
+export function markShipped(claimId: string, sellerId: string, tracking: string) {
+  const c = q.claim(claimId);
+  if (!c || q.drop(c.drop_id)?.seller_id !== sellerId) throw new AppError(404, 'NO_CLAIM', 'Order not found');
+  if (c.status !== 'paid') throw new AppError(409, 'BAD_STATE', 'Only paid orders can be shipped');
+  db.prepare('UPDATE claims SET shipped_at = ?, tracking = ? WHERE id = ?').run(now(), tracking.slice(0, 120) || null, claimId);
+  const it = q.item(c.item_id)!;
+  const sellerId_ = sellerUserId(q.drop(c.drop_id)!.seller_id);
+  enqueue(`dm:${c.buyer_id}`, async () => {
+    const fresh = q.claim(claimId)!;
+    if (fresh.order_msg_id) await nexconn.setMessageMetadata(fresh.order_msg_id, sellerId_, fresh.buyer_id, { s: 'shipped', t: String(now()) });
+    await nexconn.sendDirect(sellerId_, c.buyer_id, MSG.ORDER_UPDATE,
+      { claimId, status: 'paid', text: `📦 ${it.name} is on its way!${tracking ? `\nTracking: ${tracking}` : ''}` }, `${it.name} has shipped`);
   });
 }
 
@@ -142,8 +164,9 @@ function updateOrderCard(claimId: string) {
 }
 
 function sendOrderUpdate(claimId: string, from: 'seller' | 'buyer', text: string) {
-  updateOrderCard(claimId);
   const c = q.claim(claimId)!;
+  if (isBot(c.buyer_id)) return;
+  updateOrderCard(claimId);
   const d = q.drop(c.drop_id)!;
   const seller = sellerUserId(d.seller_id);
   const content: OrderUpdateContent = { claimId, status: c.status, text };
@@ -166,7 +189,7 @@ function promoteNext(itemId: string): ClaimRow | null {
   // Presence-aware: pass over people who have left the room, so the item doesn't stall for minutes on a ghost.
   let next: ClaimRow | undefined;
   for (const w of waiting) {
-    if (presence.isOffline(w.buyer_id)) {
+    if (presence.isOffline(w.buyer_id, 120_000)) { // "away" for 2+ minutes: they've really left
       db.prepare(`UPDATE claims SET status = 'expired' WHERE id = ?`).run(w.id);
       skippedOffline.push(w.buyer_name);
       continue;
@@ -258,7 +281,7 @@ export function buyerMarkPaid(claimId: string, buyerId: string, utr: string, shi
   publish(c.drop_id, [c.item_id]);
   roomEvent(c.drop_id, { kind: 'paying', itemId: it.id, itemName: it.name, actor: c.buyer_name, text: `${c.buyer_name} paid for ${it.name} — seller is confirming` });
   sendOrderUpdate(claimId, 'buyer',
-    `I've paid ₹${it.price} for ${it.name}. UTR: ${utr || 'n/a'}\nShip to: ${c.buyer_name}, ${ship.address} — ${ship.pincode} · ${ship.phone}`);
+    `💸 Paid ₹${it.price} for ${it.name}${utr ? ` · UPI ref ${utr}` : ''}\n📦 Ship to ${c.buyer_name}, ${ship.address} — ${ship.pincode} · ${ship.phone}`);
 }
 
 export function sellerConfirm(claimId: string, sellerId: string) {
@@ -342,10 +365,11 @@ export function startExpiryLoop() {
     for (const e of expired) {
       try { release(e.id, 'expired'); } catch (err) { console.error('expiry', err); }
     }
-    // A holder who has been offline for 60s+ can't be paying: pass the item on (if others are waiting).
-    const held = db.prepare(`SELECT c.id, c.buyer_id, c.item_id FROM claims c WHERE c.status = 'holding' AND c.hold_until > ?`).all(now() + 15_000) as { id: string; buyer_id: string; item_id: string }[];
+    // A holder who left 3+ minutes ago and never opened the UPI step isn't coming back: pass the item on (if others wait).
+    // Buyers who tapped "Pay with UPI" are expected to be offline (they're in GPay/PhonePe) and keep their full hold.
+    const held = db.prepare(`SELECT c.id, c.buyer_id, c.item_id FROM claims c WHERE c.status = 'holding' AND c.pay_opened = 0 AND c.hold_until > ?`).all(now() + 15_000) as { id: string; buyer_id: string; item_id: string }[];
     for (const h of held) {
-      if (!presence.isOffline(h.buyer_id, 60_000)) continue;
+      if (!presence.isOffline(h.buyer_id, 180_000)) continue;
       const others = q.activeClaims(h.item_id).some((x) => x.status === 'waiting');
       if (!others) continue;
       try { release(h.id, 'offline'); } catch (err) { console.error('offline release', err); }

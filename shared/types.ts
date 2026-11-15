@@ -101,6 +101,8 @@ export interface PublicDrop {
   drop: DropState;
   /** People currently in the live room (from Nexconn), if known. */
   inRoom?: number | null;
+  /** The always-on demo room (other buyers are bots). */
+  demo?: boolean;
 }
 
 export interface MyClaim {
@@ -114,6 +116,8 @@ export interface MyClaim {
   holdUntil: number | null;
   upi: string;
   shop: string;
+  shippedAt?: number | null;
+  tracking?: string | null;
 }
 
 export interface AppConfig {
@@ -129,6 +133,7 @@ export const ORDER_STATUS: Record<string, { label: string; tone: 'sun' | 'mint' 
   holding: { label: '⏳ Waiting for payment', tone: 'sun' },
   paying: { label: '💸 Buyer paid · confirming', tone: 'sun' },
   paid: { label: '✅ Payment confirmed', tone: 'mint' },
+  shipped: { label: '📦 Shipped', tone: 'mint' },
   expired: { label: '⌛ Hold expired', tone: 'muted' },
   cancelled: { label: 'Released', tone: 'muted' },
   rejected: { label: '❌ Payment not confirmed', tone: 'hot' },

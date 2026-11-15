@@ -9,7 +9,7 @@ import { presence } from './presence.ts';
 import crypto from 'node:crypto';
 import { MSG } from '../shared/types.ts';
 import {
-  AppError, buyerMarkPaid, claim, closeItem, dropItem, endDrop, logEvent, myClaims, publicDrop,
+  AppError, buyerMarkPaid, markShipped, claim, closeItem, dropItem, endDrop, logEvent, myClaims, publicDrop,
   q, release, sellerConfirm, sellerUserId, startExpiryLoop, toItem,
 } from './engine.ts';
 import type { AppConfig } from '../shared/types.ts';
@@ -105,13 +105,15 @@ app.post('/api/sellers', limit('seller', 10, 60 * 60_000), h(async (req) => {
   const name = str(req.body.name, 60, 'Your name');
   const shop = str(req.body.shop, 60, 'Shop name');
   const upi = str(req.body.upi, 80, 'UPI ID');
+  const phone = str(req.body.phone, 20, 'WhatsApp number', false).replace(/[\s-]/g, '').replace(/^\+?91/, '');
+  if (phone && !/^[6-9]\d{9}$/.test(phone)) throw new AppError(400, 'BAD_PHONE', 'Enter a 10-digit WhatsApp number');
   if (!/^[\w.\-]{2,}@[a-zA-Z]{2,}$/.test(upi)) throw new AppError(400, 'BAD_UPI', 'That UPI ID looks off (e.g. yourname@okicici)');
   const id = rid(10);
   const key = rid(24);
-  db.prepare('INSERT INTO sellers (id, name, shop, upi, key, created) VALUES (?, ?, ?, ?, ?, ?)').run(id, name, shop, upi, key, now());
+  db.prepare('INSERT INTO sellers (id, name, shop, upi, key, created, phone) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, name, shop, upi, key, now(), phone || null);
   const userId = sellerUserId(id);
   const token = await nexconn.token(userId, shop);
-  return { id, key, name, shop, upi, userId, token };
+  return { id, key, name, shop, upi, phone: phone || null, userId, token };
 }));
 
 app.post('/api/seller/session', h(async (req) => {
@@ -166,7 +168,7 @@ app.get('/api/seller/drops/:dropId', h(async (req) => {
   const items = q.items(d.id).map(toItem);
   const claims = db.prepare(`SELECT c.id, c.item_id AS itemId, c.buyer_id AS buyerId, c.buyer_name AS buyerName, c.status, c.seq,
       c.created, c.hold_until AS holdUntil, c.utr, c.paid_at AS paidAt,
-      c.ship_phone AS shipPhone, c.ship_address AS shipAddress, c.ship_pincode AS shipPincode
+      c.ship_phone AS shipPhone, c.ship_address AS shipAddress, c.ship_pincode AS shipPincode, c.shipped_at AS shippedAt, c.tracking
     FROM claims c WHERE c.drop_id = ? ORDER BY c.created DESC`).all(d.id);
   const count = (kind: string, distinct = false) => (db.prepare(
     `SELECT COUNT(${distinct ? 'DISTINCT user_id' : '*'}) AS n FROM events WHERE drop_id = ? AND kind = ?`).get(d.id, kind) as { n: number }).n;
@@ -244,6 +246,26 @@ app.post('/api/seller/drops/:dropId/items/:itemId/close', h((req) => closeItem(o
 app.post('/api/seller/drops/:dropId/end', h((req) => endDrop(ownDrop(req).d.id)));
 
 app.post('/api/seller/claims/:claimId/confirm', h((req) => sellerConfirm(String(req.params.claimId), seller(req).id)));
+app.post('/api/seller/claims/:claimId/shipped', h((req) => markShipped(String(req.params.claimId), seller(req).id, str(req.body.tracking, 120, 'Tracking', false))));
+
+/** A private rehearsal: a drop with 3 sample items the seller can open as a buyer in another tab. */
+app.post('/api/seller/practice', h(async (req) => {
+  const s = seller(req);
+  const id = rid(8);
+  const channelId = `drop_${id}`;
+  await nexconn.createOpenChannel(channelId);
+  db.prepare('INSERT INTO drops (id, seller_id, title, channel_id, status, created, hold_seconds, practice) VALUES (?, ?, ?, ?, ?, ?, ?, 1)')
+    .run(id, s.id, 'Practice drop (only you can see this)', channelId, 'live', now(), 120);
+  const demo = path.resolve(fs.existsSync('dist/web/demo') ? 'dist/web/demo' : 'web/public/demo');
+  const samples: [string, number, string][] = [['Canvas tote (practice)', 299, 'canvas-tote.jpg'], ['Floral kurti (practice)', 549, 'floral-kurti.jpg'], ['Denim jacket (practice)', 899, 'denim-jacket.jpg']];
+  samples.forEach(([name, price, file], i) => {
+    let imageId: string | null = null;
+    try { imageId = rid(16); db.prepare('INSERT INTO images (id, mime, data) VALUES (?, ?, ?)').run(imageId, 'image/jpeg', fs.readFileSync(path.join(demo, file))); } catch { imageId = null; }
+    db.prepare('INSERT INTO items (id, drop_id, name, price, image_id, status, idx) VALUES (?, ?, ?, ?, ?, ?, ?)').run(rid(8), id, name, price, imageId, 'draft', i + 1);
+  });
+  return { id };
+}));
+
 app.post('/api/seller/claims/:claimId/reject', h((req) => {
   const s = seller(req);
   const c = q.claim(String(req.params.claimId));
@@ -278,6 +300,8 @@ app.post('/api/buyer/session', h(async (req) => {
   return { id: b.id, name: b.name, isGuest: !!b.isGuest, token: await nexconn.token(b.id, b.name) };
 }));
 
+app.get('/demo', (_req, res) => res.redirect('/d/demo'));
+
 app.get('/api/drops/:dropId', h(async (req) => {
   const d = publicDrop(String(req.params.dropId));
   return { ...d, inRoom: await nexconn.participantCount(d.channelId) };
@@ -306,7 +330,7 @@ app.get('/api/shops/:sellerId', h((req) => {
       (SELECT COUNT(*) FROM items i WHERE i.drop_id = d.id AND i.status != 'draft') AS items,
       (SELECT COUNT(*) FROM items i WHERE i.drop_id = d.id AND i.status = 'sold') AS sold,
       (SELECT image_id FROM items i WHERE i.drop_id = d.id AND i.image_id IS NOT NULL ORDER BY i.idx LIMIT 1) AS cover
-    FROM drops d WHERE d.seller_id = ? ORDER BY d.created DESC LIMIT 30`).all(s.id) as { cover: string | null }[];
+    FROM drops d WHERE d.seller_id = ? AND d.practice = 0 ORDER BY d.created DESC LIMIT 30`).all(s.id) as { cover: string | null }[];
   const count = (sql: string) => Number(Object.values(db.prepare(sql).get(s.id) as object)[0] ?? 0);
   return {
     id: s.id, shop: s.shop, name: s.name,
@@ -333,15 +357,15 @@ app.get('/api/impact', h(() => {
   if (impactCache && Date.now() - impactCache.at < 30_000) return impactCache.data;
   const one = (sql: string) => Number(Object.values(db.prepare(sql).get() as object)[0] ?? 0);
   const data = {
-    sellers: one(`SELECT COUNT(DISTINCT seller_id) FROM drops`),
-    drops: one('SELECT COUNT(*) FROM drops'),
-    buyers: one(`SELECT COUNT(DISTINCT user_id) FROM events WHERE kind = 'join'`),
-    claimsSettled: one(`SELECT COUNT(*) FROM claims WHERE status IN ('paid','expired','cancelled','rejected')`),
-    contestedItems: one(`SELECT COUNT(*) FROM (SELECT item_id FROM claims GROUP BY item_id HAVING COUNT(*) > 1)`),
-    itemsSold: one(`SELECT COUNT(*) FROM items WHERE status = 'sold'`),
-    gmvInr: one(`SELECT COALESCE(SUM(i.price),0) FROM claims c JOIN items i ON i.id = c.item_id WHERE c.status = 'paid'`),
+    sellers: one(`SELECT COUNT(DISTINCT seller_id) FROM drops WHERE practice = 0`),
+    drops: one('SELECT COUNT(*) FROM drops WHERE practice = 0'),
+    buyers: one(`SELECT COUNT(DISTINCT e.user_id) FROM events e JOIN drops d ON d.id = e.drop_id WHERE e.kind = 'join' AND d.practice = 0`),
+    claimsSettled: one(`SELECT COUNT(*) FROM claims c JOIN drops d ON d.id = c.drop_id WHERE d.practice = 0 AND c.status IN ('paid','expired','cancelled','rejected')`),
+    contestedItems: one(`SELECT COUNT(*) FROM (SELECT c.item_id FROM claims c JOIN drops d ON d.id = c.drop_id WHERE d.practice = 0 GROUP BY c.item_id HAVING COUNT(*) > 1)`),
+    itemsSold: one(`SELECT COUNT(*) FROM items i JOIN drops d ON d.id = i.drop_id WHERE d.practice = 0 AND i.status = 'sold'`),
+    gmvInr: one(`SELECT COALESCE(SUM(i.price),0) FROM claims c JOIN items i ON i.id = c.item_id JOIN drops d ON d.id = c.drop_id WHERE d.practice = 0 AND c.status = 'paid'`),
     liveNow: (db.prepare(`SELECT d.id, d.title, s.shop FROM drops d JOIN sellers s ON s.id = d.seller_id
-      WHERE d.status = 'live' AND EXISTS (SELECT 1 FROM items i WHERE i.drop_id = d.id AND i.status != 'draft') ORDER BY d.created DESC LIMIT 5`).all()),
+      WHERE d.status = 'live' AND d.practice = 0 AND EXISTS (SELECT 1 FROM items i WHERE i.drop_id = d.id AND i.status != 'draft') ORDER BY d.created DESC LIMIT 5`).all()),
   };
   impactCache = { at: Date.now(), data };
   return data;
@@ -404,6 +428,14 @@ app.get('/api/buyer/shipping', h((req) => {
   return db.prepare('SELECT phone, address, pincode FROM buyers WHERE id = ?').get(b.id) ?? {};
 }));
 
+/** Buyer tapped "Pay with UPI": they're about to leave for their UPI app, so presence must not cost them the hold. */
+app.post('/api/claims/:claimId/paying-app', h((req) => {
+  const b = buyer(req);
+  const c = q.claim(String(req.params.claimId));
+  if (!c || c.buyer_id !== b.id) throw new AppError(404, 'NO_CLAIM', 'Claim not found');
+  db.prepare('UPDATE claims SET pay_opened = 1 WHERE id = ?').run(c.id);
+}));
+
 app.post('/api/claims/:claimId/release', h((req) => {
   const b = buyer(req);
   const c = q.claim(String(req.params.claimId));
@@ -415,13 +447,16 @@ app.post('/api/claims/:claimId/release', h((req) => {
 // Console → Chat → Chat settings → Webhooks: URL https://<host>/api/nexconn/webhook,
 // events: user:connection_status, open_channel:pre_messaging.
 
+const seenWebhookTypes = new Set<string>();
 const PAY_SCAM = /([\w.\-]{2,}@[a-z]{2,})|((?:\+?91[\s-]?)?[6-9]\d{4}[\s-]?\d{5})/gi;
 
 /** Room chat runs through this before Nexconn delivers it: mask off-platform payment details and stamp the real name. */
 export function moderateRoomChat(senderId: string, channelId: string, messageType: string, rawContent: string) {
-  if (messageType !== MSG.CHAT) return { pass: 1 };
   const d = db.prepare('SELECT id, seller_id FROM drops WHERE channel_id = ?').get(channelId) as { id: string; seller_id: string } | undefined;
-  if (!d || senderId === sellerUserId(d.seller_id)) return { pass: 1 };
+  if (!d) return { pass: 1 };
+  if (senderId === sellerUserId(d.seller_id)) return { pass: 1 }; // the shop (and our server, which sends as the shop)
+  // Buyers may only send room chat. Anything else (fake drop cards, fake "you won / pay here" events, built-in types) is dropped.
+  if (messageType !== MSG.CHAT) { logEvent(d.id, 'spoof_blocked', senderId); return { pass: 0, extra: 'only_chat_allowed' }; }
   let c: { text?: string; name?: string } = {};
   try { c = JSON.parse(rawContent); } catch { return { pass: 0, extra: 'bad_content' }; }
   const real = (db.prepare('SELECT name FROM buyers WHERE id = ?').get(senderId) as { name: string } | undefined)?.name ?? 'Buyer';
@@ -441,7 +476,9 @@ app.post('/api/nexconn/webhook', express.json({ limit: '1mb' }), (req, res) => {
   if (!appKey || req.header('AppKey') !== appKey || sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
     return res.status(401).json({ error: 'bad signature' });
   }
+  if (Math.abs(Date.now() - Number(ts)) > 5 * 60_000) return res.status(401).json({ error: 'stale' }); // replay protection
   const type = String(req.body?.type || '');
+  if (!seenWebhookTypes.has(type)) { seenWebhookTypes.add(type); console.log('[webhook] first', type, JSON.stringify(req.body).slice(0, 400)); }
   const data: any[] = Array.isArray(req.body?.data) ? req.body.data : [];
   if (type === 'user:connection_status') {
     for (const e of data) presence.set(String(e.userId), String(e.status) === '0', Number(e.time) || Date.now());
@@ -482,6 +519,7 @@ app.get('/api/admin/stats', h((req) => {
     gmvInr: one(`SELECT COALESCE(SUM(i.price),0) FROM claims c JOIN items i ON i.id = c.item_id WHERE c.status = 'paid'`),
     joinsViaShares: one(`SELECT COUNT(*) FROM events WHERE kind = 'join' AND ref IS NOT NULL`),
     scamMessagesMasked: one(`SELECT COUNT(*) FROM events WHERE kind = 'scam_masked'`),
+    spoofsBlocked: one(`SELECT COUNT(*) FROM events WHERE kind = 'spoof_blocked'`),
     follows: one('SELECT COUNT(*) FROM follows'),
     proWaitlist: one('SELECT COUNT(*) FROM pro_waitlist'),
     feedback: db.prepare('SELECT role, rating, text, quote_ok AS quoteOk, created FROM feedback ORDER BY created DESC LIMIT 50').all(),
@@ -567,6 +605,7 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 startExpiryLoop();
+import('./demo.ts').then((m) => m.startDemo()).catch((e) => console.error('[demo] failed to start', e));
 app.listen(config.port, () => {
   console.log(`ClaimIt server on http://localhost:${config.port} (mode: ${config.mode}${config.mode === 'nexconn' ? `, area ${config.nexconn.area}` : ''})`);
 });

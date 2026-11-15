@@ -103,6 +103,11 @@ addColumn('claims', 'ship_address', 'TEXT');
 addColumn('claims', 'ship_pincode', 'TEXT');
 addColumn('events', 'ref', 'TEXT');
 addColumn('claims', 'order_msg_id', 'TEXT');
+addColumn('claims', 'pay_opened', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('claims', 'shipped_at', 'INTEGER');
+addColumn('claims', 'tracking', 'TEXT');
+addColumn('sellers', 'phone', 'TEXT');
+addColumn('drops', 'practice', 'INTEGER NOT NULL DEFAULT 0');
 db.exec(`
 CREATE TABLE IF NOT EXISTS follows (
   seller_id TEXT NOT NULL REFERENCES sellers(id),

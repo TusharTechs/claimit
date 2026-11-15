@@ -60,13 +60,22 @@ export function QR({ value, size = 168, className = '' }: { value: string; size?
   return <canvas ref={ref} className={`rounded-xl ${className}`} style={{ width: size, height: size }} />;
 }
 
+// Stack of open sheets so Escape only closes the top one.
+const sheetStack: number[] = [];
+let sheetSeq = 0;
+
 export function Sheet({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode }) {
   const panel = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     if (!open) return;
+    const me = ++sheetSeq;
+    sheetStack.push(me);
     const prev = document.activeElement as HTMLElement | null;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (sheetStack[sheetStack.length - 1] !== me) return;
+      if (e.key === 'Escape') closeRef.current();
       if (e.key === 'Tab' && panel.current) { // simple focus trap
         const f = panel.current.querySelectorAll<HTMLElement>('button, a[href], input, textarea, select, [tabindex]:not([tabindex="-1"])');
         if (!f.length) return;
@@ -77,8 +86,12 @@ export function Sheet({ open, onClose, title, children }: { open: boolean; onClo
     };
     window.addEventListener('keydown', onKey);
     setTimeout(() => panel.current?.querySelector<HTMLElement>('[data-autofocus], button')?.focus(), 30);
-    return () => { window.removeEventListener('keydown', onKey); prev?.focus?.(); };
-  }, [open, onClose]);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      sheetStack.splice(sheetStack.indexOf(me), 1);
+      prev?.focus?.();
+    };
+  }, [open]); // only on open/close — re-renders while open must never steal focus from inputs
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" role="dialog" aria-modal aria-label={typeof title === 'string' ? title : undefined}>
@@ -106,8 +119,8 @@ export function ConfirmSheet({ open, title, body, confirmLabel, tone = 'hot', on
     <Sheet open={open} onClose={onClose} title={title}>
       <div className="text-ink-2">{body}</div>
       <div className="mt-5 flex gap-2 pb-2">
-        <button className="btn flex-1 bg-line/70 py-3 text-ink" onClick={onClose}>Cancel</button>
-        <button data-autofocus className={`btn flex-1 py-3 text-white ${cls}`} onClick={() => { onConfirm(); onClose(); }}>{confirmLabel}</button>
+        <button data-autofocus className="btn flex-1 bg-line/70 py-3 text-ink" onClick={onClose}>Cancel</button>
+        <button className={`btn flex-1 py-3 text-white ${cls}`} onClick={() => { onConfirm(); onClose(); }}>{confirmLabel}</button>
       </div>
     </Sheet>
   );

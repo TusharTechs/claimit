@@ -120,6 +120,7 @@ export default function SellerConsole() {
   const { drop, items, stats } = data;
   const link = `${location.origin}/d/${drop.id}`;
   const toConfirm = data.claims.filter((c) => c.status === 'paying' || c.status === 'holding');
+  const needsAction = data.claims.filter((c) => c.status === 'paying').length;
   const ended = drop.status === 'ended';
   const totalUnread = Object.values(unread).reduce((a, b) => a + b, 0);
 
@@ -151,7 +152,13 @@ export default function SellerConsole() {
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-6xl gap-5 px-4 py-5 lg:grid-cols-[1fr_400px]">
+      {needsAction > 0 && (
+        <button onClick={() => { setTab('pay'); document.getElementById('seller-panel')?.scrollIntoView({ behavior: 'smooth' }); }}
+          className="sticky top-[64px] z-20 flex w-full items-center justify-center gap-2 bg-mint px-4 py-2.5 text-sm font-bold text-white lg:hidden">
+          💸 {needsAction} payment{needsAction > 1 ? 's' : ''} to confirm →
+        </button>
+      )}
+      <main className="mx-auto grid max-w-6xl gap-5 px-4 pb-28 pt-5 lg:grid-cols-[1fr_400px]">
         <div className="space-y-5">
           {/* Share + stats */}
           <section className="grid gap-4 rounded-[26px] border border-line bg-card p-4 shadow-[var(--shadow-card)] sm:grid-cols-[auto_1fr]">
@@ -166,6 +173,19 @@ export default function SellerConsole() {
                 <button className="btn border-2 border-ink px-4 py-1.5 text-sm" onClick={() => act(() => api.downloadOrders(drop.id))}>Orders CSV</button>
                 <button className="btn border-2 border-line px-4 py-1.5 text-sm text-ink-2" onClick={() => setDeviceOpen(true)}>Use on another device</button>
               </div>
+              <details className="mt-2 rounded-xl bg-paper px-3 py-2 text-sm">
+                <summary className="cursor-pointer font-semibold">Copy for Instagram / WhatsApp</summary>
+                {[
+                  ['Pinned comment', `🛍️ Don't comment MINE — tap here to claim, first tap wins & everyone sees the queue: ${link}`],
+                  ['Story link sticker', `LIVE DROP NOW 🔴 Tap to claim`],
+                  ['Say on your live', `“Link is in my pinned comment / story — open it in another tab, keep watching here, tap CLAIM when I say the number!”`],
+                ].map(([k, v]) => (
+                  <div key={k} className="mt-2 flex items-start gap-2">
+                    <div className="min-w-0 flex-1"><div className="text-xs font-bold text-muted">{k}</div><div className="text-ink-2">{v}</div></div>
+                    <CopyButton text={v} label="Copy" className="!px-3 !py-1 !text-xs" />
+                  </div>
+                ))}
+              </details>
               <label className="mt-2 flex items-center gap-2 text-sm text-ink-2">
                 Time to pay after winning:
                 <select className="rounded-lg border border-line bg-white px-2 py-1 font-semibold text-ink" value={Math.round(drop.holdSeconds / 60)}
@@ -208,10 +228,10 @@ export default function SellerConsole() {
         </div>
 
         {/* Right panel */}
-        <aside className="lg:sticky lg:top-[76px] lg:h-[calc(100dvh-96px)]">
+        <aside id="seller-panel" className="lg:sticky lg:top-[76px] lg:h-[calc(100dvh-96px)]">
           <div className="flex h-full min-h-[420px] flex-col rounded-[26px] border border-line bg-card p-3 shadow-[var(--shadow-card)]">
             <div className="flex gap-1 rounded-full bg-paper p-1">
-              {([['pay', `Payments${toConfirm.length ? ` (${toConfirm.length})` : ''}`], ['room', 'Room'], ['inbox', `Inbox${totalUnread ? ` (${totalUnread})` : ''}`]] as [Tab, string][]).map(([k, l]) => (
+              {([['pay', `Payments${needsAction ? ` (${needsAction})` : ''}`], ['room', 'Room'], ['inbox', `Inbox${totalUnread ? ` (${totalUnread})` : ''}`]] as [Tab, string][]).map(([k, l]) => (
                 <button key={k} onClick={() => setTab(k)} className={`flex-1 rounded-full py-2 text-sm font-semibold ${tab === k ? 'bg-ink text-white' : 'text-ink-2'}`}>{l}</button>
               ))}
             </div>
@@ -341,32 +361,54 @@ function AddItem({ dropId, onAdded, toast }: { dropId: string; onAdded: () => vo
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
   const [image, setImage] = useState<string | null>(null);
+  const [queue, setQueue] = useState<string[]>([]); // photos picked in one go: each pre-fills the next item
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
   return (
-    <form className="flex flex-wrap items-end gap-3 rounded-[26px] border border-line bg-card p-4 shadow-[var(--shadow-card)]" onSubmit={async (e) => {
+    <form className="rounded-[26px] border border-line bg-card p-4 shadow-[var(--shadow-card)]" onSubmit={async (e) => {
       e.preventDefault(); setBusy(true);
       try {
         await api.addItem(dropId, { name, price: Number(price), image });
-        setName(''); setPrice(''); setImage(null); if (fileRef.current) fileRef.current.value = '';
+        setName(''); setPrice('');
+        const [next, ...rest] = queue;
+        setImage(next ?? null); setQueue(rest);
+        if (fileRef.current) fileRef.current.value = '';
         onAdded();
+        if (next) nameRef.current?.focus();
       } catch (e2) { toast(e2 instanceof Error ? e2.message : 'Could not add', 'hot'); } finally { setBusy(false); }
     }}>
-      <button type="button" onClick={() => fileRef.current?.click()} className="grid size-20 shrink-0 place-items-center overflow-hidden rounded-2xl border-2 border-dashed border-line bg-paper text-xs font-semibold text-muted">
-        {image ? <img src={image} alt="" className="size-full object-cover" /> : <span>+ Photo</span>}
-      </button>
-      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={async (e) => {
-        const f = e.target.files?.[0];
-        if (f) { try { setImage(await resizeImage(f)); } catch (err) { toast(err instanceof Error ? err.message : 'Bad image', 'hot'); } }
-      }} />
-      <div className="min-w-40 flex-1">
-        <span className="mb-1 block text-xs font-bold uppercase tracking-wider text-muted">Add item</span>
-        <input className="input" placeholder="Item name, size" value={name} onChange={(e) => setName(e.target.value)} required maxLength={80} />
+      <div className="flex flex-wrap items-end gap-3">
+        <button type="button" onClick={() => fileRef.current?.click()} className="relative grid size-20 shrink-0 place-items-center overflow-hidden rounded-2xl border-2 border-dashed border-line bg-paper text-xs font-semibold text-muted">
+          {image ? <img src={image} alt="" className="size-full object-cover" /> : <span className="px-1 text-center">+ Photos</span>}
+        </button>
+        <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={async (e) => {
+          const files = [...(e.target.files ?? [])].slice(0, 40);
+          if (!files.length) return;
+          try {
+            const imgs = await Promise.all(files.map((f) => resizeImage(f)));
+            setImage(imgs[0]); setQueue(imgs.slice(1));
+            if (imgs.length > 1) toast(`${imgs.length} photos ready — name & price each one`);
+            nameRef.current?.focus();
+          } catch (err) { toast(err instanceof Error ? err.message : 'Bad image', 'hot'); }
+        }} />
+        <div className="min-w-40 flex-1">
+          <label htmlFor="item-name" className="mb-1 block text-xs font-bold uppercase tracking-wider text-muted">Add item</label>
+          <input id="item-name" ref={nameRef} className="input" placeholder="Item name, size" value={name} onChange={(e) => setName(e.target.value)} required maxLength={80} />
+        </div>
+        <div className="w-28">
+          <label htmlFor="item-price" className="sr-only">Price in rupees</label>
+          <input id="item-price" className="input" placeholder="₹ Price" inputMode="numeric" value={price} onChange={(e) => setPrice(e.target.value.replace(/[^\d]/g, ''))} required />
+        </div>
+        <button className="btn bg-ink px-5 py-3 text-white" disabled={busy || !name.trim() || !price}>{busy ? <Spinner /> : 'Add'}</button>
       </div>
-      <div className="w-28">
-        <input className="input" placeholder="₹ Price" inputMode="numeric" value={price} onChange={(e) => setPrice(e.target.value.replace(/[^\d]/g, ''))} required />
-      </div>
-      <button className="btn bg-ink px-5 py-3 text-white" disabled={busy || !name.trim() || !price}>{busy ? <Spinner /> : 'Add'}</button>
+      {queue.length > 0 && (
+        <div className="mt-3 flex items-center gap-2 text-sm text-muted">
+          <div className="flex -space-x-2">{queue.slice(0, 6).map((q, i) => <img key={i} src={q} alt="" className="size-8 rounded-lg border-2 border-white object-cover" />)}</div>
+          {queue.length} more photo{queue.length > 1 ? 's' : ''} queued — each one fills in after you add this item
+        </div>
+      )}
+      <p className="mt-2 text-xs text-muted">Tip: pick all your photos at once before going live, then just type name + price for each.</p>
     </form>
   );
 }
@@ -408,9 +450,33 @@ function ItemRow({ it, claims, ended, isNext, holdSeconds, onDrop, onClose, onDe
         </div>
       )}
       {waiting.length > 0 && <div className="mt-2 text-xs text-muted">Next in line: {waiting.map((w) => w.buyerName).join(' → ')}</div>}
-      {winner && <div className="mt-2 text-sm font-semibold text-mint">Sold to {winner.buyerName}</div>}
+      {winner && <div className="mt-2 text-sm font-semibold text-mint">Sold to {winner.buyerName}{winner.shippedAt ? ' · 📦 shipped' : ''}</div>}
       {winner && <ShipTo c={winner} />}
+      {winner && !winner.shippedAt && <ShipButton c={winner} />}
+      {winner?.shippedAt && winner.tracking && <div className="mt-1 text-xs text-muted">Tracking: {winner.tracking}</div>}
     </div>
+  );
+}
+
+function ShipButton({ c }: { c: SellerClaim }) {
+  const [open, setOpen] = useState(false);
+  const [tracking, setTracking] = useState('');
+  const toasts = useToasts();
+  return (
+    <>
+      <button className="btn mt-2 bg-ink px-4 py-2 text-sm text-white" onClick={() => setOpen(true)}>📦 Mark shipped</button>
+      <Sheet open={open} onClose={() => setOpen(false)} title={`Ship to ${c.buyerName}`}>
+        <form className="pb-2" onSubmit={async (e) => {
+          e.preventDefault();
+          try { await api.markShipped(c.id, tracking.trim()); toasts.push(`${c.buyerName} has been told it's on its way`, 'mint'); setOpen(false); }
+          catch (err) { toasts.push(err instanceof Error ? err.message : 'Failed', 'hot'); }
+        }}>
+          <label htmlFor={`trk-${c.id}`} className="block text-sm font-semibold">Courier & tracking number <span className="font-normal text-muted">(optional)</span></label>
+          <input id={`trk-${c.id}`} data-autofocus className="input mt-1" placeholder="e.g. Delhivery 1234567890" value={tracking} onChange={(e) => setTracking(e.target.value)} maxLength={120} />
+          <button className="btn mt-4 w-full bg-ink py-3 text-white">Mark shipped & notify</button>
+        </form>
+      </Sheet>
+    </>
   );
 }
 

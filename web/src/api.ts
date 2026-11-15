@@ -54,7 +54,7 @@ export interface SellerDropSummary { id: string; title: string; status: string; 
 export interface SellerClaim {
   id: string; itemId: string; buyerId: string; buyerName: string; status: MyClaim['status'];
   seq: number; created: number; holdUntil: number | null; utr: string | null; paidAt: number | null;
-  shipPhone: string | null; shipAddress: string | null; shipPincode: string | null;
+  shipPhone: string | null; shipAddress: string | null; shipPincode: string | null; shippedAt: number | null; tracking: string | null;
 }
 export interface Shipping { phone: string; address: string; pincode: string }
 export interface SellerDrop {
@@ -74,7 +74,9 @@ export interface Impact {
 export const api = {
   config: () => req<AppConfig>('GET', '/api/config'),
 
-  createSeller: (b: { name: string; shop: string; upi: string }) =>
+  markShipped: (claimId: string, tracking: string) => req('POST', `/api/seller/claims/${claimId}/shipped`, { tracking }, 'seller'),
+  practiceDrop: () => req<{ id: string }>('POST', '/api/seller/practice', {}, 'seller'),
+  createSeller: (b: { name: string; shop: string; upi: string; phone?: string }) =>
     req<SellerSession & { userId: string; token: string }>('POST', '/api/sellers', b),
   sellerSession: () => req<SellerSession & { userId: string; token: string }>('POST', '/api/seller/session', {}, 'seller'),
   sellerDrops: () => req<SellerDropSummary[]>('GET', '/api/seller/drops', undefined, 'seller'),
@@ -126,4 +128,5 @@ export const api = {
   markPaid: (claimId: string, b: Shipping & { utr: string }) => req('POST', `/api/claims/${claimId}/paid`, b, 'buyer'),
   shipping: () => req<Partial<Shipping>>('GET', '/api/buyer/shipping', undefined, 'buyer'),
   release: (claimId: string) => req('POST', `/api/claims/${claimId}/release`, {}, 'buyer'),
+  payingApp: (claimId: string) => req('POST', `/api/claims/${claimId}/paying-app`, {}, 'buyer'),
 };

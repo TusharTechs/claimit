@@ -150,8 +150,8 @@ export default function Landing() {
 
       <main>
         {/* Hero */}
-        <section className="mx-auto grid max-w-6xl items-center gap-12 px-4 pb-16 pt-6 sm:px-6 md:grid-cols-[1.1fr_1fr] md:pt-12">
-          <div>
+        <section className="mx-auto grid max-w-6xl items-center gap-x-12 gap-y-8 px-4 pb-16 pt-6 sm:px-6 md:grid-cols-[1.1fr_1fr] md:pt-12">
+          <div className="md:col-start-1 md:row-start-1">
             {impact?.liveNow?.[0] ? (
               <Link to={`/d/${impact.liveNow[0].id}`} className="mb-5 inline-flex items-center gap-2 rounded-full bg-hot px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white">
                 <span className="anim-live size-2 rounded-full bg-white" /> Live now: {impact.liveNow[0].shop}
@@ -164,19 +164,21 @@ export default function Landing() {
             <h1 className="font-display text-[46px] font-extrabold leading-[0.95] tracking-tight sm:text-7xl">
               “Comment MINE”<br />is broken.<br /><span className="text-hot">Claim it fair.</span>
             </h1>
-            <p className="mt-6 max-w-md text-lg text-ink-2">
+          </div>
+          <div className="md:col-start-2 md:row-span-2 md:row-start-1"><PhoneDemo /></div>
+          <div className="md:col-start-1 md:row-start-2">
+            <p className="max-w-md text-lg text-ink-2">
               Share one link during your live. Buyers tap <b>Claim</b>, everyone watches the same queue, and the winner lands straight in a
               checkout chat with your UPI. If they don’t pay in time, the next person gets it — automatically.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link to="/sell" className="btn anim-ring bg-hot px-7 py-4 text-lg text-white shadow-[var(--shadow-pop)]">Start a drop — free</Link>
-              <a href="#how" className="btn border-2 border-ink px-6 py-3.5 text-lg">See how it works</a>
+              <Link to="/d/demo" className="btn border-2 border-ink px-6 py-3.5 text-lg">Try the live demo</Link>
             </div>
             <ul className="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm font-semibold text-ink-2">
               {['No app for buyers', '0% commission', 'Pay by any UPI app'].map((t) => <li key={t} className="flex items-center gap-1.5"><Check className="size-4 text-mint" />{t}</li>)}
             </ul>
           </div>
-          <PhoneDemo />
         </section>
 
         {showImpact && (
