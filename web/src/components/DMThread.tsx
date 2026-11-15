@@ -60,6 +60,10 @@ export function DMThread({ peerId, peerName, onActivity, compact = false }: {
 }
 
 function Bubble({ m }: { m: RtMessage }) {
+  // Order cards are only ever sent by a shop (s_…); anything else claiming to be one is not shown as an order.
+  if ((m.type === MSG.ORDER || m.type === MSG.ORDER_UPDATE) && !m.sender.startsWith('s_')) {
+    return <div className="mx-auto max-w-xs rounded-xl bg-hot-soft px-3 py-2 text-center text-[13px] text-hot-dark">⚠️ Hidden: a fake order message</div>;
+  }
   if (m.type === MSG.ORDER) {
     const o = m.content as OrderContent;
     const st = ORDER_STATUS[m.meta?.s ?? ''];
@@ -74,7 +78,7 @@ function Bubble({ m }: { m: RtMessage }) {
           {o.image && <img src={o.image} alt="" className="size-12 rounded-xl object-cover" />}
           <div className="min-w-0">
             <div className="truncate font-semibold">{o.itemName}</div>
-            <div className="text-sm text-ink-2">{money(o.price, o.currency)} · {o.upi ? `UPI ${o.upi}` : 'payment link'}</div>
+            <div className="text-sm text-ink-2">{money(o.price, o.currency)} · {o.upi ? `UPI ${o.upi}` : o.payLink ? 'payment link' : 'bank / wallet transfer'}</div>
           </div>
         </div>
       </div>

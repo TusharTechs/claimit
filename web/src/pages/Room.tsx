@@ -4,10 +4,10 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Check, ChevronRight, Lock, MessageCircle, Share2, ShoppingBag, Truck, WifiOff } from 'lucide-react';
 import { api, ApiError, sessions, type BuyerSession, type Shipping } from '../api';
 import { rt, type RtMessage } from '../rt';
-import { Avatar, ConfirmSheet, ItemThumb, Logo, LogoMark, QR, Sheet, Spinner, celebrate, useToasts } from '../components/ui';
+import { Avatar, ConfirmSheet, CopyButton, ItemThumb, Logo, LogoMark, QR, Sheet, Spinner, celebrate, useToasts } from '../components/ui';
 import { DMThread } from '../components/DMThread';
 import { ensureBuyer, shopIdOf } from '../buyer';
-import { embedUrl, mmss, money, rupees, setCurrency, upiLink, useCountdown, useDebounced } from '../util';
+import { embedUrl, mmss, money, payLinkFor, rupees, setCurrency, upiLink, useCountdown, useDebounced } from '../util';
 import {
   MSG, itemKey,
   type ChatContent, type DropCardContent, type DropState, type EventContent, type Item, type ItemState, type MyClaim, type PublicDrop,
@@ -26,8 +26,8 @@ const involves = (s: ItemState | undefined, id: string | undefined) =>
   !!s && !!id && (s.holder?.id === id || s.waitlist.some((w) => w.id === id));
 
 /** Hide phone numbers and UPI IDs in buyer chat: the #1 scam is "pay me directly at …". */
-const PAY_SCAM = /([\w.\-]{2,}@[a-z][\w-]*(?:\.[\w-]+)*)|((?:paypal\.me|venmo\.com|cash\.app|wa\.me|gcash\.me)\/\S+)|(\$[A-Za-z][\w]{2,})|(\+?\d[\d\s().-]{7,}\d)/gi;
-const scrub = (t: string) => t.replace(PAY_SCAM, '•••');
+const PAY_SCAM = /([\w.\-]{2,}@[a-z][\w-]*(?:\.[\w-]+)*)|((?:paypal\.me|venmo\.com|cash\.app|wa\.me|gcash\.me)\/\S+)|(\$[A-Za-z][\w]{2,})|(\+?\d[\d\s().-]{6,}\d)/gi;
+const scrub = (t: string) => t.replace(PAY_SCAM, (m, _e, _l, _t, phone) => (phone && m.replace(/\D/g, '').length < 9 ? m : '•••'));
 
 export default function Room() {
   const { dropId = '' } = useParams();
@@ -204,7 +204,7 @@ export default function Room() {
 
   const doClaim = async (item: Item) => {
     if (!me) return;
-    if (me.isGuest) { setNameFor(item.id); return; }
+    if (me.isGuest && !drop?.demo) { setNameFor(item.id); return; }
     claimedHere.current.add(item.id); // the order DM can arrive before this response — don't treat it as a promotion
     setTimeout(() => claimedHere.current.delete(item.id), 20_000);
     try {
@@ -354,6 +354,7 @@ export default function Room() {
 
       <Sheet open={ordersOpen} onClose={() => setOrdersOpen(false)} title="My orders">
         <Orders claims={claims} sellerId={drop.sellerId} shop={drop.shop} buyerName={me?.name ?? ''} onChange={loadClaims} toast={toasts.push} />
+        <Link to="/orders" className="mt-3 block text-center text-sm font-semibold text-muted underline">All my orders, from every shop →</Link>
       </Sheet>
 
       <NameSheet open={!!nameFor} shop={drop.shop} onClose={() => setNameFor(null)} onDone={async (name) => {
@@ -372,7 +373,7 @@ export default function Room() {
             <motion.div initial={{ scale: 0.6, y: 20 }} animate={{ scale: 1, y: 0 }} transition={{ type: 'spring', stiffness: 260, damping: 16 }}>
               <div className="mx-auto grid size-20 place-items-center rounded-full bg-white text-mint"><Check className="size-11" strokeWidth={3} /></div>
               <div className="mt-5 font-display text-5xl font-extrabold leading-none">You're up!</div>
-              <p className="mt-3 text-lg font-semibold opacity-95">{yourTurn} is yours for {Math.round(drop.holdSeconds / 60)} min. Pay to keep it.</p>
+              <p className="mt-3 text-lg font-semibold opacity-95">{yourTurn} is yours for {drop.holdSeconds < 60 ? `${drop.holdSeconds} seconds` : `${Math.round(drop.holdSeconds / 60)} min`}. Pay to keep it.</p>
             </motion.div>
           </motion.div>
         )}
@@ -436,7 +437,7 @@ function ItemHero({ item, st, me, compact, isLatest, holdSeconds }: {
       className="overflow-hidden rounded-[26px] border border-line bg-card shadow-[var(--shadow-card)]">
       <div className={`relative bg-line ${compact ? 'aspect-[16/9]' : 'aspect-[4/3]'}`}>
         <ItemThumb name={item.name} image={item.image} big />
-        <div className="absolute left-3 top-3 rounded-full bg-ink/85 px-2.5 py-1 text-xs font-bold text-white">#{item.idx}{isLatest ? ' · JUST DROPPED' : ''}</div>
+        <div className="absolute left-3 top-3 rounded-full bg-ink/85 px-2.5 py-1 text-xs font-bold text-white">#{item.idx}{isLatest && status !== 'sold' ? ' · JUST DROPPED' : ''}</div>
         {status === 'sold' && (
           <>
             <div className="anim-flash absolute inset-0 bg-mint" />
@@ -468,7 +469,7 @@ function ItemHero({ item, st, me, compact, isLatest, holdSeconds }: {
                   </motion.div>
                 )}
               </AnimatePresence>
-              {status === 'held' && <HoldBar until={st?.holdUntil} total={holdSeconds} />}
+              {status === 'held' && <HoldBar until={st?.holdUntil} total={holder?.id.startsWith('bot_') ? 20 : holdSeconds} />}
               {waitlist.length > 0 && (
                 <div className="mt-2.5 flex items-center gap-2 text-[#6b4600]">
                   <span className="text-xs font-bold uppercase tracking-wide">Next</span>
@@ -652,6 +653,13 @@ function PaidExtras({ c, toast }: { c: MyClaim; toast: Toast }) {
     const url = location.href.split('?')[0] + (sessions.buyer() ? `?r=${sessions.buyer()!.id}` : '');
     try { if (navigator.share) await navigator.share({ title: 'ClaimIt', text, url }); else { await navigator.clipboard.writeText(`${text} ${url}`); toast('Copied — paste it in your story'); } } catch { /* cancelled */ }
   };
+  if (c.demo) return (
+    <div className="mt-3 rounded-2xl bg-ink p-4 text-white">
+      <div className="font-display text-xl font-extrabold">That's the whole flow 🎉</div>
+      <p className="mt-1 text-sm text-white/80">Claim → pay → confirmed, with a fair queue the whole room could see. Run the same thing for your followers, free.</p>
+      <Link to="/sell" className="btn mt-3 w-full bg-hot py-3 text-white">Start my own drop →</Link>
+    </div>
+  );
   return (
     <div className="mt-3 space-y-2">
       <button className="btn w-full bg-hot-soft py-2.5 text-sm text-hot-dark" onClick={share}><Share2 className="size-4" /> Share your win</button>
@@ -711,6 +719,7 @@ function Stepper({ at }: { at: number }) {
 function OrderCard({ c, buyerName, onChange, toast }: { c: MyClaim; buyerName: string; onChange: () => void; toast: Toast }) {
   const left = useCountdown(c.status === 'holding' ? c.holdUntil : null);
   const [txn, setTxn] = useState('');
+  const [showRef, setShowRef] = useState(false);
   const [ship, setShip] = useState<Shipping>({ phone: '', address: '', pincode: '' });
   const [editing, setEditing] = useState(true);
   const [payTapped, setPayTapped] = useState(false);
@@ -720,6 +729,11 @@ function OrderCard({ c, buyerName, onChange, toast }: { c: MyClaim; buyerName: s
 
   useEffect(() => {
     if (c.status !== 'holding') return;
+    if (c.demo) { // Demo: a ready-made address so the whole checkout takes one tap.
+      setShip((cur) => cur.address ? cur : { phone: '+1 415 555 0123', address: '1 Demo Street, Sample City', pincode: '94103' });
+      setEditing(false);
+      return;
+    }
     api.shipping().then((s) => {
       setShip((cur) => ({ phone: cur.phone || s.phone || '', address: cur.address || s.address || '', pincode: cur.pincode || s.pincode || '' }));
       if (s.phone && s.address && s.pincode) setEditing(false);
@@ -739,7 +753,7 @@ function OrderCard({ c, buyerName, onChange, toast }: { c: MyClaim; buyerName: s
   const shipOk = (india ? /^[6-9]\d{9}$/.test(phoneDigits) : /^\+?\d{7,15}$/.test(phoneDigits))
     && ship.address.trim().length >= 10 && (india ? /^[1-9]\d{5}$/.test(ship.pincode) : /^[A-Za-z0-9 -]{3,10}$/.test(ship.pincode.trim()));
   // India: UPI deep link (any UPI app). Elsewhere: the seller's payment link (PayPal.me, Venmo, Stripe, GCash…).
-  const link = c.upi ? upiLink(c.upi, c.shop, c.price, `ClaimIt ${c.itemName}`) : c.payLink || '';
+  const link = c.upi ? upiLink(c.upi, c.shop, c.price, `ClaimIt ${c.itemName}`) : c.payLink ? payLinkFor(c.payLink, c.price, c.currency, c.itemName) : '';
   const price = money(c.price, c.currency);
   const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
   const act = async (fn: () => Promise<unknown>, ok: string) => {
@@ -793,32 +807,54 @@ function OrderCard({ c, buyerName, onChange, toast }: { c: MyClaim; buyerName: s
             )}
           </section>
 
-          {/* ② Pay */}
+          {/* ② Pay, then ③ tell the seller — kept together so "I've paid" is always right under the pay button */}
           <section className={`rounded-xl p-3 ${shipOk ? 'bg-mint-soft/60' : 'bg-paper opacity-60'}`}>
             <div className="text-xs font-bold uppercase tracking-wider text-muted">Pay {c.shop}</div>
-            <a href={shipOk ? link : undefined} aria-disabled={!shipOk} target={c.upi ? undefined : '_blank'} rel="noreferrer"
-              onClick={() => { if (!shipOk) return; setPayTapped(true); api.payingApp(c.id).catch(() => {}); }}
-              className={`btn mt-2 w-full py-3 text-white ${shipOk ? 'bg-mint' : 'pointer-events-none bg-muted'}`}>
-              {c.upi ? `Pay ${price} with any UPI app` : `Pay ${price} via ${c.shop}'s payment link ↗`}
-            </a>
-            {!isMobile && shipOk && c.upi && (
-              <div className="mt-2 flex items-center gap-3 rounded-xl bg-white p-2">
-                <QR value={link} size={88} />
-                <p className="text-sm text-ink-2">On a laptop? Scan with your phone's UPI app to pay <b>{c.upi}</b></p>
-              </div>
-            )}
-            {!c.upi && shipOk && <p className="mt-1.5 text-xs text-muted">Pay exactly {price}. Add “{c.itemName}” as the note.</p>}
-          </section>
+            {c.demo ? (
+              <>
+                <button className="btn mt-2 w-full bg-mint py-3 text-white" disabled={busy || !shipOk}
+                  onClick={() => act(() => api.markPaid(c.id, { utr: 'DEMO', ...ship, phone: phoneDigits }), 'Paid! The demo shop confirms in a few seconds')}>
+                  {busy ? <Spinner /> : `Simulate paying ${price} (demo)`}
+                </button>
+                <p className="mt-1.5 text-center text-xs text-muted">No real money moves in the demo. In a real drop this opens the seller's PayPal, UPI or payment link.</p>
+              </>
+            ) : (
+              <>
+                {link ? (
+                  <a href={shipOk ? link : undefined} aria-disabled={!shipOk} target={c.upi ? undefined : '_blank'} rel="noreferrer"
+                    onClick={() => { if (!shipOk) return; setPayTapped(true); api.payingApp(c.id).catch(() => {}); }}
+                    className={`btn mt-2 w-full py-3 text-white ${shipOk ? 'bg-mint' : 'pointer-events-none bg-muted'}`}>
+                    {c.upi ? `Pay ${price} with any UPI app` : `Pay ${price} via ${c.shop}'s payment link ↗`}
+                  </a>
+                ) : c.payNote ? (
+                  <div className="mt-2 rounded-xl bg-white p-3">
+                    <div className="text-sm text-ink-2">Send <b className="text-ink">{price}</b> to</div>
+                    <div className="mt-0.5 whitespace-pre-line break-words font-semibold">{c.payNote}</div>
+                    {shipOk && <div className="mt-2 flex gap-2"><CopyButton text={c.payNote} label="Copy details" className="!py-1.5" /><CopyButton text={String(c.price)} label="Copy amount" className="!bg-white !py-1.5 !text-ink shadow-sm" /></div>}
+                  </div>
+                ) : null}
+                {!isMobile && shipOk && c.upi && (
+                  <div className="mt-2 flex items-center gap-3 rounded-xl bg-white p-2">
+                    <QR value={link} size={88} />
+                    <p className="text-sm text-ink-2">On a laptop? Scan with your phone's UPI app to pay <b>{c.upi}</b></p>
+                  </div>
+                )}
+                {!c.upi && shipOk && <p className="mt-1.5 text-xs text-muted">Pay exactly {price}. Add “{c.itemName}” as the note.</p>}
 
-          {/* ③ Confirm */}
-          <section className="rounded-xl bg-paper p-3">
-            <div className="text-xs font-bold uppercase tracking-wider text-muted">Then tell {c.shop} you've paid</div>
-            <label className="mt-2 block text-sm font-semibold" htmlFor={`txn-${c.id}`}>{c.upi ? 'UPI transaction ID' : 'Payment reference'} <span className="font-normal text-muted">(optional, speeds up confirmation)</span></label>
-            <input id={`txn-${c.id}`} className="input mt-1 !py-2 text-sm" placeholder={c.upi ? '12-digit ref from your UPI app' : 'Transaction ID or the name you paid from'} value={txn} onChange={(e) => setTxn(e.target.value)} maxLength={40} />
-            <button ref={paidRef} className={`btn mt-2 w-full py-3 text-white ${payTapped ? 'anim-ring bg-ink' : 'bg-ink'}`} disabled={busy || !shipOk}
-              onClick={() => act(() => api.markPaid(c.id, { utr: txn, ...ship, phone: phoneDigits }), 'Sent — the seller will confirm shortly')}>
-              {busy ? <Spinner /> : "I've paid"}
-            </button>
+                <button ref={paidRef} className={`btn mt-3 w-full py-3 text-white ${payTapped ? 'anim-ring bg-ink' : 'bg-ink'}`} disabled={busy || !shipOk}
+                  onClick={() => act(() => api.markPaid(c.id, { utr: txn, ...ship, phone: phoneDigits }), 'Sent — the seller will confirm shortly')}>
+                  {busy ? <Spinner /> : "I've paid — tell the seller"}
+                </button>
+                {shipOk && (showRef ? (
+                  <div className="mt-2">
+                    <label className="block text-sm font-semibold" htmlFor={`txn-${c.id}`}>{c.upi ? 'UPI transaction ID' : 'Payment reference'} <span className="font-normal text-muted">(optional, speeds up confirmation)</span></label>
+                    <input id={`txn-${c.id}`} className="input mt-1 !py-2 text-sm" autoFocus placeholder={c.upi ? '12-digit ref from your UPI app' : 'Transaction ID or the name you paid from'} value={txn} onChange={(e) => setTxn(e.target.value)} maxLength={40} />
+                  </div>
+                ) : (
+                  <button className="mt-1.5 w-full text-center text-xs font-semibold text-muted underline" onClick={() => setShowRef(true)}>Add a payment reference (optional)</button>
+                ))}
+              </>
+            )}
             {!shipOk && <p className="mt-1.5 text-center text-xs text-muted">Add your delivery details first.</p>}
           </section>
 

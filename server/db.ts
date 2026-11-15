@@ -109,6 +109,7 @@ addColumn('claims', 'tracking', 'TEXT');
 addColumn('sellers', 'phone', 'TEXT');
 addColumn('sellers', 'currency', "TEXT NOT NULL DEFAULT 'INR'");
 addColumn('sellers', 'pay_link', 'TEXT');
+addColumn('sellers', 'pay_note', 'TEXT'); // account details (GCash number, bank account, Zelle email…)
 addColumn('drops', 'practice', 'INTEGER NOT NULL DEFAULT 0');
 db.exec(`
 CREATE TABLE IF NOT EXISTS follows (

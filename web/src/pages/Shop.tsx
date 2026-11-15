@@ -50,7 +50,7 @@ export default function Shop() {
         </div>
         <h1 className="mt-3 font-display text-3xl font-extrabold leading-tight">{shop.shop}</h1>
         <p className="mt-1 flex items-center justify-center gap-1.5 text-sm text-muted">
-          <ShieldCheck className="size-4 text-mint" /> Fair drops on ClaimIt since {new Date(shop.since).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}
+          <ShieldCheck className="size-4 text-mint" /> Fair drops on ClaimIt since {new Date(shop.since).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}
         </p>
         <div className="mt-4 grid grid-cols-3 gap-2">
           {[['Followers', shop.followers], ['Drops', shop.drops.length], ['Orders', shop.orders]].map(([k, v]) => (
@@ -84,7 +84,7 @@ export default function Shop() {
               <div className="aspect-[4/3] bg-line"><ItemThumb name={d.title} image={d.cover} /></div>
               <div className="p-2.5">
                 <div className="line-clamp-2 text-sm font-semibold leading-tight">{d.title}</div>
-                <div className="mt-1 text-xs text-muted">{d.sold}/{d.items} sold · {new Date(d.created).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</div>
+                <div className="mt-1 text-xs text-muted">{d.sold}/{d.items} sold · {new Date(d.created).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</div>
               </div>
             </Link>
           ))}

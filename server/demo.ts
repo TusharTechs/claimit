@@ -4,7 +4,7 @@
 import { config } from './config.ts';
 import { db, now } from './db.ts';
 import { nexconn } from './nexconn.ts';
-import { buyerMarkPaid, claim, q, sellerConfirm, sellerUserId } from './engine.ts';
+import { buyerMarkPaid, claim, q, release, sellerConfirm, sellerUserId } from './engine.ts';
 import { MSG } from '../shared/types.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -30,7 +30,8 @@ async function ensureDemo() {
       .run(SELLER, 'Demo', 'ClaimIt Demo Shop', 'demo@claimit', 'demo-no-login-' + Math.random().toString(36).slice(2), now());
   }
   // Global demo: USD, international bot names (kept in sync on every boot).
-  db.prepare(`UPDATE sellers SET currency = 'USD' WHERE id = ?`).run(SELLER);
+  db.prepare(`UPDATE sellers SET currency = 'USD', upi = '', pay_link = 'https://claimit.demo/pay' WHERE id = ?`).run(SELLER);
+  db.prepare(`UPDATE drops SET hold_seconds = 150 WHERE id = ?`).run(DEMO_DROP); // humans get 2.5 min; bots hold 20s
   for (const b of BOTS) db.prepare('UPDATE buyers SET name = ? WHERE id = ?').run(b.name, b.id);
   [['demoit0', 'Canvas tote', 18], ['demoit1', 'Floral summer dress · S', 29], ['demoit2', 'Vintage denim jacket · M', 42]]
     .forEach(([id, name, price]) => db.prepare('UPDATE items SET name = ?, price = ? WHERE id = ?').run(name, price, id));
@@ -38,7 +39,7 @@ async function ensureDemo() {
   if (!q.drop(DEMO_DROP)) {
     await nexconn.createOpenChannel(`drop_${DEMO_DROP}`).catch(() => {});
     db.prepare('INSERT INTO drops (id, seller_id, title, channel_id, status, created, hold_seconds, practice) VALUES (?, ?, ?, ?, ?, ?, ?, 1)')
-      .run(DEMO_DROP, SELLER, 'Live demo — try to beat the bots', `drop_${DEMO_DROP}`, 'live', now(), 25);
+      .run(DEMO_DROP, SELLER, 'Live demo — try to beat the bots', `drop_${DEMO_DROP}`, 'live', now(), 150);
     const dir = path.resolve(fs.existsSync('dist/web/demo') ? 'dist/web/demo' : 'web/public/demo');
     const items: [string, number, string][] = [['Canvas tote', 18, 'canvas-tote.jpg'], ['Floral summer dress · S', 29, 'floral-kurti.jpg'], ['Vintage denim jacket · M', 42, 'denim-jacket.jpg']];
     items.forEach(([name, price, file], i) => {
@@ -58,18 +59,18 @@ async function nextRound() {
   const items = db.prepare('SELECT id FROM items WHERE drop_id = ? ORDER BY idx').all(DEMO_DROP) as { id: string }[];
   const idx = current ? (items.findIndex((i) => i.id === current) + 1) % items.length : 0;
   const itemId = items[idx].id;
-  // Reset the item: clear old claims so it can be dropped again.
-  db.prepare(`DELETE FROM claims WHERE item_id = ?`).run(itemId);
+  // Reset the item: clear old bot / unfinished claims so it can be dropped again (a visitor's paid order is kept).
+  db.prepare(`DELETE FROM claims WHERE item_id = ? AND (buyer_id LIKE 'bot\\_%' ESCAPE '\\' OR status != 'paid')`).run(itemId);
   db.prepare(`UPDATE items SET status = 'closed' WHERE id = ?`).run(itemId);
   current = itemId;
   phaseAt = now();
   const { dropItem } = await import('./engine.ts');
   dropItem(DEMO_DROP, itemId);
-  // Three bots tap within a second; the first one never pays (hold expires → next in line), the second pays.
-  later(1400, () => claim(DEMO_DROP, itemId, BOTS[0]));
-  later(1650, () => claim(DEMO_DROP, itemId, BOTS[1]));
-  later(1900, () => claim(DEMO_DROP, itemId, BOTS[2]));
-  later(4000, () => chat(BOTS[2], CHATTER[Math.floor(Math.random() * CHATTER.length)]));
+  // Bots tap 3–4s after the drop (a quick human can beat them). The first never pays (hold expires → next in line).
+  later(3000, () => claim(DEMO_DROP, itemId, BOTS[0]));
+  later(3600, () => claim(DEMO_DROP, itemId, BOTS[1]));
+  later(4200, () => claim(DEMO_DROP, itemId, BOTS[2]));
+  later(6000, () => chat(BOTS[2], CHATTER[Math.floor(Math.random() * CHATTER.length)]));
 }
 
 function chat(bot: { id: string; name: string }, text: string) {
@@ -82,9 +83,16 @@ function tick() {
   if (!current) return;
   const it = q.item(current);
   if (!it) return;
-  const holder = q.activeClaims(current).find((c) => c.status === 'holding' || c.status === 'paying');
-  // The second bot pays ~6s after being promoted.
-  if (holder?.status === 'holding' && holder.buyer_id === BOTS[1].id && holder.hold_until && holder.hold_until - now() < (25 - 6) * 1000) {
+  const active = q.activeClaims(current);
+  const holder = active.find((c) => c.status === 'holding' || c.status === 'paying');
+  const humanWaiting = active.some((c) => c.status === 'waiting' && !isBot(c.buyer_id));
+  // Bots make way for real visitors: a bot holding while a human waits "runs out of time" after ~4s.
+  if (holder?.status === 'holding' && isBot(holder.buyer_id) && humanWaiting && holder.hold_until && holder.hold_until - now() < 17_000) {
+    release(holder.id, 'expired');
+    return;
+  }
+  // Otherwise the second bot pays ~6s after being promoted.
+  if (holder?.status === 'holding' && holder.buyer_id === BOTS[1].id && !humanWaiting && holder.hold_until && holder.hold_until - now() < 14_000) {
     buyerMarkPaid(holder.id, holder.buyer_id, '', { phone: '+10000000000', address: 'Demo address, Demo City', pincode: '00000' });
   }
   // The demo shop confirms any payment (bot or a real visitor's) after 3s.
@@ -103,8 +111,8 @@ let pendingNext = false;
 export async function startDemo() {
   if (process.env.DEMO_ROOM === 'off') return;
   await ensureDemo();
-  // Clean slate on boot: no stale demo claims.
-  db.prepare(`DELETE FROM claims WHERE drop_id = ?`).run(DEMO_DROP);
+  // Clean slate on boot: no stale demo claims (a visitor's paid demo order stays in their "My orders").
+  db.prepare(`DELETE FROM claims WHERE drop_id = ? AND (buyer_id LIKE 'bot\\_%' ESCAPE '\\' OR status != 'paid')`).run(DEMO_DROP);
   db.prepare(`UPDATE items SET status = 'draft' WHERE drop_id = ?`).run(DEMO_DROP);
   await nextRound();
   setInterval(tick, 1000);

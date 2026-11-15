@@ -16,7 +16,7 @@ Millions of social sellers run live sales on Instagram, TikTok, Facebook, YouTub
 | Live claim queue that every viewer sees update at the same moment | **Open channel metadata (KV)**, written by the server arbiter with per-item versions; clients use `onMetadataChanged` |
 | Drops and claim events always get through, fan chat is dropped first under load | **Priority message types** (`CI:Drop`, `CI:Event`) plus a **low-priority type** (`CI:Chat`), registered by `npm run setup:nexconn`; server sends use `priority: 2` |
 | Anti-scam room chat: phone numbers, emails and payment handles masked, and sender names forced to their real value | **Pre-message webhook** (`open_channel:pre_messaging`): Nexconn holds each message until our server passes or rewrites it |
-| Presence-aware queue: offline buyers are skipped, and a holder who leaves loses the hold early | **User connection-status webhook** (`user:connection_status`) |
+| Presence-aware queue: buyers who have been offline for 2+ minutes are skipped (and told why). A holder who disconnects for 3+ minutes without opening the payment page loses the hold early, but only if someone is waiting | **User connection-status webhook** (`user:connection_status`) |
 | Order card whose status updates in place (waiting for payment, then paid, then confirmed) | **Direct channel** custom message `CI:Order`, sent with `hasMetadata`; the server updates it through **message metadata** (`/v4/channel-type/message/metadata/set`), and clients use `onMessageMetadataUpdated` |
 | Buyer and seller order chat | Direct channel: text through the SDK, plus `CI:OrderUpd` status messages |
 | Seller inbox on desktop | **Nexconn Chat UI** (`@nexconn/chatui`), with custom Web Component bubbles that render live order cards |
@@ -29,12 +29,12 @@ The **claim arbiter** runs on the app server. Every state change is a single syn
 **Webhook setup** (Console → Chat → Chat settings → Webhooks):
 
 - URL: `https://<your-host>/api/nexconn/webhook`
-- Events: `user:connection_status` and `open_channel:pre_messaging`
+- Events: `user:connection_status`, `open_channel:pre_messaging` and `direct_channel:pre_messaging` (blocks order cards sent by anyone but a shop)
 - Requests are verified with `sha1(AppSecret + Nonce + Timestamp)`.
 
 **Notes on scope:**
 
-- Shops choose a currency. Buyers pay the seller directly, by UPI or the seller's own payment link (PayPal.me, Venmo, Stripe, GCash and others). The buyer taps "I've paid" and adds an optional transaction ID, then the seller confirms in one tap. ClaimIt never holds money.
+- Shops choose a currency. Buyers pay the seller directly: by UPI, by the seller's own payment link (PayPal.me, Venmo and Cash App links get the amount pre-filled; Stripe, Wise and others work as-is), or by account details the seller types once (GCash number, bank account, Zelle email). The buyer taps "I've paid" and adds an optional transaction ID, then the seller confirms in one tap. ClaimIt never holds money.
 - Low-priority shedding is a Nexconn server behaviour under load (more than about 40 messages per 200 ms in a room). ClaimIt configures it but doesn't simulate floods.
 
 ## Run locally

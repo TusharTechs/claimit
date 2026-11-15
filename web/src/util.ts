@@ -18,6 +18,22 @@ export function upiLink(upi: string, shop: string, amount: number, note: string)
   return `upi://pay?${p.toString()}`;
 }
 
+/** Pre-fill the amount on links that support it (PayPal.me, Venmo, Cash App); other links are returned unchanged. */
+export function payLinkFor(link: string, amount: number, currency = 'USD', note = '') {
+  try {
+    const u = new URL(link);
+    const host = u.hostname.replace(/^www\./, '');
+    const parts = u.pathname.split('/').filter(Boolean);
+    if (host === 'paypal.me' && parts.length === 1) return `https://paypal.me/${parts[0]}/${amount}${currency}`;
+    if (host === 'venmo.com' && currency === 'USD' && parts.length >= 1) {
+      const user = parts[0] === 'u' ? parts[1] : parts[0];
+      if (user) return `https://venmo.com/${user}?txn=pay&amount=${amount}&note=${encodeURIComponent(note.slice(0, 60))}`;
+    }
+    if (host === 'cash.app' && currency === 'USD' && parts.length === 1 && parts[0]!.startsWith('$')) return `https://cash.app/${parts[0]}/${amount}`;
+  } catch { /* not a URL */ }
+  return link;
+}
+
 /** Seconds left until `until` (ms timestamp), ticking every 250ms. */
 export function useCountdown(until: number | null | undefined) {
   const [left, setLeft] = useState(() => (until ? Math.max(0, until - Date.now()) : 0));
@@ -80,7 +96,7 @@ export function embedUrl(url: string | null): string | null {
   return null;
 }
 
-export const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((s) => s[0]!.toUpperCase()).join('');
+export const initials = (name: string) => name.replace(/\([^)]*\)/g, '').split(/\s+/).map((w) => w.replace(/[^\p{L}\p{N}]/gu, '')).filter(Boolean).slice(0, 2).map((s) => [...s][0]!.toUpperCase()).join('') || '?';
 
 const HUES = [12, 28, 160, 200, 260, 320, 45, 100];
 export const hueFor = (id: string) => HUES[[...id].reduce((a, c) => a + c.charCodeAt(0), 0) % HUES.length];

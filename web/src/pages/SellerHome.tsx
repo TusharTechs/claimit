@@ -70,10 +70,10 @@ function Onboard({ onDone }: { onDone: (s: SellerSession) => void }) {
   return (
     <div className="mx-auto max-w-md pt-6">
       <h1 className="font-display text-4xl font-extrabold leading-tight">Set up your shop</h1>
-      <p className="mt-2 text-ink-2">Takes 20 seconds. Buyers pay you directly — by UPI, PayPal or any payment link. ClaimIt never touches your money.</p>
+      <p className="mt-2 text-ink-2">Takes 20 seconds. Buyers pay you directly — by PayPal, UPI, GCash, bank transfer or any payment link. ClaimIt never touches your money.</p>
       <form className="mt-6 space-y-3" onSubmit={async (e) => {
         e.preventDefault(); setBusy(true); setErr('');
-        try { const s = await api.createSeller(f); setCreated({ id: s.id, key: s.key, name: s.name, shop: s.shop, upi: s.upi, currency: s.currency, payLink: s.payLink, phone: (s as any).phone ?? null }); }
+        try { const s = await api.createSeller(f); setCreated({ id: s.id, key: s.key, name: s.name, shop: s.shop, upi: s.upi, currency: s.currency, payLink: s.payLink, payNote: (s as any).payNote ?? null, phone: (s as any).phone ?? null }); }
         catch (e2) { setErr(e2 instanceof Error ? e2.message : 'Something went wrong'); } finally { setBusy(false); }
       }}>
         <label className="block"><span className="mb-1 block text-sm font-semibold">Your name</span>
@@ -86,9 +86,11 @@ function Onboard({ onDone }: { onDone: (s: SellerSession) => void }) {
               ['MYR', '🇲🇾 Malaysia · RM MYR'], ['THB', '🇹🇭 Thailand · ฿ THB'], ['AED', '🇦🇪 UAE · AED'], ['GBP', '🇬🇧 United Kingdom · £ GBP'], ['EUR', '🇪🇺 Europe · € EUR']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select></label>
         <label className="block"><span className="mb-1 block text-sm font-semibold">How buyers pay you</span>
-          <input className="input" value={f.upi} onChange={(e) => setF({ ...f, upi: e.target.value.trim() })} required maxLength={300} autoCapitalize="none"
-            placeholder={india ? 'UPI ID, e.g. asha@okicici' : 'Payment link, e.g. https://paypal.me/yourshop'} />
-          <span className="mt-1 block text-xs text-muted">{india ? 'Your UPI ID — or any payment link starting with https://' : 'PayPal.me, Venmo, Stripe Payment Link, GCash, Wise… any https:// link'}</span></label>
+          <textarea className="input" rows={2} value={f.upi} onChange={(e) => setF({ ...f, upi: e.target.value.trimStart() })} required maxLength={300} autoCapitalize="none"
+            placeholder={india ? 'UPI ID, e.g. asha@okicici' : 'https://paypal.me/yourshop  — or —  GCash 0917 555 0123 (Maya R.)'} />
+          <span className="mt-1 block text-xs text-muted">{india
+            ? 'Your UPI ID, any https:// payment link, or bank details'
+            : 'A payment link (PayPal.me, Venmo, Cash App, Stripe, Wise…) — the amount is filled in for buyers where supported. No link? Type your account details (GCash, bank transfer, Zelle…) and winners see them at checkout.'}</span></label>
         <label className="block"><span className="mb-1 block text-sm font-semibold">Your WhatsApp number <span className="font-normal text-muted">(to save your login link)</span></span>
           <input className="input" type="tel" inputMode="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value.replace(/[^\d+ ]/g, '').slice(0, 16) })} placeholder={india ? '98765 43210' : '+1 415 555 0123'} autoComplete="tel" /></label>
         {err && <p className="text-sm font-semibold text-hot-dark">{err}</p>}
@@ -119,7 +121,7 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
     <div className="pt-4">
       <div className="text-sm font-semibold text-muted">Hi {seller.name} 👋</div>
       <h1 className="font-display text-4xl font-extrabold">{seller.shop}</h1>
-      <p className="text-sm text-muted">Payments go to <b className="text-ink-2">{seller.upi || seller.payLink}</b></p>
+      <p className="text-sm text-muted">Payments go to <b className="text-ink-2">{seller.upi || seller.payLink || seller.payNote}</b></p>
       <div className="mt-3 flex flex-wrap gap-2 text-sm">
         <Link to={`/s/${seller.id}`} className="btn bg-white px-4 py-2 shadow-sm">Your shop page ↗</Link>
         <Link to="/pricing" className="btn bg-white px-4 py-2 shadow-sm">Pricing</Link>
@@ -156,7 +158,7 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
             <Link key={d.id} to={`/sell/${d.id}`} className="flex items-center justify-between rounded-2xl border border-line bg-card px-4 py-3 hover:border-ink">
               <div className="min-w-0">
                 <div className="truncate font-semibold">{d.title}</div>
-                <div className="text-sm text-muted">{d.items} items · {d.sold} sold · {new Date(d.created).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</div>
+                <div className="text-sm text-muted">{d.items} items · {d.sold} sold · {new Date(d.created).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</div>
               </div>
               <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${d.status === 'live' ? 'bg-hot text-white' : 'bg-line text-ink-2'}`}>{d.status === 'live' ? 'LIVE' : 'ENDED'}</span>
             </Link>

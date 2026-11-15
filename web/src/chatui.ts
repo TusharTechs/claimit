@@ -50,6 +50,7 @@ class OrderBubble extends HTMLElement {
   }
   private render() {
     if (!this._m) return;
+    if (!fromShop(this._m)) { this.innerHTML = FAKE; return; }
     const o = contentOf<OrderContent>(this._m);
     const raw = (this._m as any)?.message?.metadata ?? (this._m as any)?.metadata;
     const md: Record<string, string> = { ...(raw instanceof Map ? Object.fromEntries(raw) : raw || {}), ...this._md };
@@ -63,12 +64,20 @@ class OrderBubble extends HTMLElement {
         <div style="display:flex;gap:10px;align-items:center;margin-top:6px">${img}
           <div style="min-width:0">
             <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(o.itemName)}</div>
-            <div style="font-size:13px;color:#3a312a">${rupees(o.price, o.currency)} · ${o.upi ? 'UPI ' + esc(o.upi) : 'payment link'}</div>
+            <div style="font-size:13px;color:#3a312a">${rupees(o.price, o.currency)} · ${o.upi ? 'UPI ' + esc(o.upi) : o.payLink ? 'payment link' : 'bank / wallet transfer'}</div>
           </div>
         </div>
       </div>`;
   }
 }
+
+/** Order cards are only ever sent by a shop (s_…). Unknown sender shape → trust (server webhook also blocks forgeries). */
+function fromShop(m: unknown) {
+  const x = m as any;
+  const id = x?.senderUserId ?? x?.senderId ?? x?.message?.senderUserId ?? x?.message?.senderId;
+  return typeof id !== 'string' || id.startsWith('s_');
+}
+const FAKE = '<div style="font:13px Inter,system-ui,sans-serif;padding:8px 12px;border-radius:12px;background:#ffe6dc;color:#d93a10">⚠️ Hidden: a fake order message</div>';
 
 /** Order status line bubble, <nc-c-claimit-order-update>. */
 class OrderUpdateBubble extends HTMLElement {
@@ -78,6 +87,7 @@ class OrderUpdateBubble extends HTMLElement {
   connectedCallback() { this.render(); }
   private render() {
     if (!this._m) return;
+    if (!fromShop(this._m)) { this.innerHTML = FAKE; return; }
     const u = contentOf<OrderUpdateContent>(this._m);
     const tone = u.status === 'paid' ? '#14a06a' : u.status === 'paying' ? '#8a5a00' : '#3a312a';
     this.innerHTML = `<div style="font-family:Inter,system-ui,sans-serif;max-width:280px;white-space:pre-line;padding:8px 12px;border-radius:12px;background:#f5efe8;font-size:13px;color:${tone}">${esc(u.text)}</div>`;

@@ -327,7 +327,7 @@ export default function SellerConsole() {
       <ConfirmSheet open={confirmEnd} onClose={() => setConfirmEnd(false)} title="End this drop?" tone="ink"
         body="Buyers won't be able to claim anything else. Orders already claimed stay as they are." confirmLabel="End drop"
         onConfirm={() => act(() => api.endDrop(drop.id), 'Drop ended — here is your recap')} />
-      <ConfirmSheet open={!!confirmPay} onClose={() => setConfirmPay(null)} title={`Did ₹${items.find((i) => i.id === confirmPay?.itemId)?.price ?? ''} arrive?`} tone="mint"
+      <ConfirmSheet open={!!confirmPay} onClose={() => setConfirmPay(null)} title={`Did ${rupees(items.find((i) => i.id === confirmPay?.itemId)?.price ?? 0)} arrive?`} tone="mint"
         body={<>Check your payment app for a payment from <b>{confirmPay?.buyerName}</b>{confirmPay?.utr ? <> with reference <b>{confirmPay.utr}</b></> : null}. Confirming marks the item sold and tells the buyer.</>}
         confirmLabel="Yes, payment received" onConfirm={() => confirmPay && act(() => api.confirm(confirmPay.id), `Sold to ${confirmPay.buyerName} ✓`)} />
       <ConfirmSheet open={!!confirmSkip} onClose={() => setConfirmSkip(null)} title={`Skip ${confirmSkip?.buyerName}?`} tone="ink"

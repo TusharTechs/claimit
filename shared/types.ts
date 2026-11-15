@@ -81,6 +81,7 @@ export interface OrderContent {
   holdUntil: number;
   currency?: string;
   payLink?: string | null;
+  payNote?: string | null;
 }
 
 export interface OrderUpdateContent {
@@ -121,6 +122,8 @@ export interface MyClaim {
   shop: string;
   currency?: string;
   payLink?: string | null;
+  payNote?: string | null;
+  demo?: boolean;
   shippedAt?: number | null;
   tracking?: string | null;
 }

@@ -58,7 +58,7 @@ function seller(req: Request) {
   const id = req.header('x-seller-id') || '';
   const key = req.header('x-seller-key') || '';
   const row = db.prepare('SELECT * FROM sellers WHERE id = ? AND key = ?').get(id, key) as
-    { id: string; name: string; shop: string; upi: string; currency: string; pay_link: string | null } | undefined;
+    { id: string; name: string; shop: string; upi: string; currency: string; pay_link: string | null; pay_note: string | null } | undefined;
   if (!row) throw new AppError(401, 'NO_AUTH', 'Seller session not found');
   return row;
 }
@@ -107,27 +107,30 @@ app.post('/api/sellers', limit('seller', 10, 60 * 60_000), h(async (req) => {
   // "How buyers pay you": a UPI ID (India) or any https payment link (PayPal.me, Venmo, Stripe, GCash…).
   const currency = (CURRENCIES as readonly string[]).includes(String(req.body.currency)) ? String(req.body.currency) : 'INR';
   const payInput = str(req.body.upi ?? req.body.pay, 300, 'How buyers pay you');
+  // INR: a UPI ID. Anywhere: an https payment link. Otherwise: account details shown to the winner (GCash number, bank account, Zelle email…).
   const isLink = /^https:\/\/\S+\.\S+/i.test(payInput);
-  const upi = isLink ? '' : payInput;
+  const isUpi = !isLink && currency === 'INR' && /^[\w.\-]{2,}@[a-zA-Z]{2,}$/.test(payInput);
+  const upi = isUpi ? payInput : '';
   const payLink = isLink ? payInput : null;
+  const payNote = !isLink && !isUpi ? payInput : null;
   const rawPhone = str(req.body.phone, 20, 'WhatsApp number', false).replace(/[\s-()]/g, '');
   const phone = currency === 'INR' ? rawPhone.replace(/^\+?91/, '') : rawPhone.replace(/^\+/, '');
   if (phone && (currency === 'INR' ? !/^[6-9]\d{9}$/.test(phone) : !/^\d{7,15}$/.test(phone))) {
     throw new AppError(400, 'BAD_PHONE', currency === 'INR' ? 'Enter a 10-digit WhatsApp number' : 'Enter your WhatsApp number with country code');
   }
-  if (!isLink && !/^[\w.\-]{2,}@[a-zA-Z]{2,}$/.test(upi)) throw new AppError(400, 'BAD_PAY', 'Enter a UPI ID (yourname@okicici) or a payment link starting with https://');
+  if (payNote && payNote.length < 6) throw new AppError(400, 'BAD_PAY', currency === 'INR' ? 'Enter a UPI ID (yourname@okicici), a payment link, or your account details' : 'Enter a payment link (https://…) or your account details');
   const id = rid(10);
   const key = rid(24);
-  db.prepare('INSERT INTO sellers (id, name, shop, upi, key, created, phone, currency, pay_link) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, name, shop, upi, key, now(), phone || null, currency, payLink);
+  db.prepare('INSERT INTO sellers (id, name, shop, upi, key, created, phone, currency, pay_link, pay_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, name, shop, upi, key, now(), phone || null, currency, payLink, payNote);
   const userId = sellerUserId(id);
   const token = await nexconn.token(userId, shop);
-  return { id, key, name, shop, upi, payLink, currency, phone: phone || null, userId, token };
+  return { id, key, name, shop, upi, payLink, payNote, currency, phone: phone || null, userId, token };
 }));
 
 app.post('/api/seller/session', h(async (req) => {
   const s = seller(req);
   const userId = sellerUserId(s.id);
-  return { ...s, payLink: s.pay_link, userId, token: await nexconn.token(userId, s.shop) };
+  return { ...s, payLink: s.pay_link, payNote: s.pay_note, userId, token: await nexconn.token(userId, s.shop) };
 }));
 
 /** Names for Nexconn Chat UI (its reqUserProfiles hook): buyers who ordered from this seller, plus the seller. */
@@ -213,11 +216,12 @@ app.get('/api/seller/drops/:dropId/orders.csv', (req, res, next) => {
         c.utr, c.status, c.paid_at, c.created
       FROM claims c JOIN items i ON i.id = c.item_id WHERE c.drop_id = ? AND c.status IN ('paid','paying') ORDER BY i.idx`).all(d.id) as Record<string, unknown>[];
     const cell = (v: unknown) => {
-      const t = v === null || v === undefined ? '' : String(v);
+      let t = v === null || v === undefined ? '' : String(v);
+      if (/^[=+\-@\t\r]/.test(t) && typeof v === 'string') t = `'${t}`; // no spreadsheet formula injection from buyer-typed fields
       return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
     };
     const fmt = (ms: unknown) => (ms ? new Date(Number(ms)).toISOString().replace('T', ' ').slice(0, 16) : '');
-    const lines = [['Order ID', 'Item #', 'Item', 'Price (INR)', 'Buyer', 'Phone', 'Address', 'PIN', 'UTR', 'Status', 'Paid at (UTC)'].join(',')];
+    const lines = [['Order ID', 'Item #', 'Item', `Price (${q.seller(d.seller_id)?.currency ?? 'USD'})`, 'Buyer', 'Phone', 'Address', 'Postal code', 'Payment ref', 'Status', 'Paid at (UTC)'].join(',')];
     for (const r of rows) {
       lines.push([r.id, r.idx, r.item, r.price, r.buyer_name, r.ship_phone, r.ship_address, r.ship_pincode, r.utr,
         r.status === 'paid' ? 'Payment confirmed' : 'Awaiting confirmation', fmt(r.paid_at)].map(cell).join(','));
@@ -422,7 +426,7 @@ app.get('/api/drops/:dropId/me', h((req) => myClaims(String(req.params.dropId), 
 
 app.post('/api/drops/:dropId/items/:itemId/claim', limit('claim', 30, 60_000), h((req) => {
   const b = buyer(req);
-  if (b.isGuest) throw new AppError(409, 'NEED_NAME', 'Tell the seller your name to claim');
+  if (b.isGuest && String(req.params.dropId) !== 'demo') throw new AppError(409, 'NEED_NAME', 'Tell the seller your name to claim');
   return claim(String(req.params.dropId), String(req.params.itemId), { id: b.id, name: b.name });
 }));
 
@@ -436,7 +440,23 @@ app.post('/api/claims/:claimId/paid', h((req) => {
   if (address.length < 10) throw new AppError(400, 'BAD_ADDRESS', 'Please enter your full delivery address');
   const pincode = str(req.body.pincode, 10, india ? 'PIN code' : 'Postal code');
   if (india ? !/^[1-9]\d{5}$/.test(pincode) : !/^[A-Za-z0-9 -]{3,10}$/.test(pincode)) throw new AppError(400, 'BAD_PIN', india ? 'Enter a 6-digit PIN code' : 'Enter a valid postal code');
-  return buyerMarkPaid(String(req.params.claimId), buyer(req).id, str(req.body.utr, 40, 'UTR', false), { phone, address, pincode });
+  return buyerMarkPaid(String(req.params.claimId), buyer(req).id, str(req.body.utr, 40, 'Payment reference', false), { phone, address, pincode });
+}));
+
+/** Everything a buyer has claimed, across every shop and drop, plus the shops they follow (and which are live now). */
+app.get('/api/buyer/orders', h((req) => {
+  const b = buyer(req);
+  const drops = db.prepare(`SELECT DISTINCT drop_id FROM claims WHERE buyer_id = ? ORDER BY created DESC LIMIT 30`).all(b.id) as { drop_id: string }[];
+  const orders = drops.flatMap(({ drop_id }) => {
+    const d = q.drop(drop_id);
+    if (!d) return [];
+    return myClaims(drop_id, b.id)
+      .map((c) => ({ ...c, dropId: d.id, dropTitle: d.title, sellerId: d.seller_id, dropLive: d.status === 'live' }));
+  });
+  const following = (db.prepare(`SELECT s.id, s.shop, (SELECT d.id FROM drops d WHERE d.seller_id = s.id AND d.status = 'live' AND d.practice = 0 ORDER BY d.created DESC LIMIT 1) AS liveDrop,
+      (SELECT d.title FROM drops d WHERE d.seller_id = s.id AND d.status = 'live' AND d.practice = 0 ORDER BY d.created DESC LIMIT 1) AS liveTitle
+    FROM follows f JOIN sellers s ON s.id = f.seller_id WHERE f.buyer_id = ? ORDER BY f.created DESC`).all(b.id));
+  return { orders, following };
 }));
 
 app.get('/api/buyer/shipping', h((req) => {
@@ -461,10 +481,12 @@ app.post('/api/claims/:claimId/release', h((req) => {
 
 // ---------- Nexconn webhooks: presence + pre-message moderation ----------
 // Console → Chat → Chat settings → Webhooks: URL https://<host>/api/nexconn/webhook,
-// events: user:connection_status, open_channel:pre_messaging.
+// events: user:connection_status, open_channel:pre_messaging, direct_channel:pre_messaging.
 
 const seenWebhookTypes = new Set<string>();
-const PAY_SCAM = /([\w.\-]{2,}@[a-z][\w-]*(?:\.[\w-]+)*)|((?:paypal\.me|venmo\.com|cash\.app|wa\.me|gcash\.me)\/\S+)|(\$[A-Za-z][\w]{2,})|(\+?\d[\d\s().-]{7,}\d)/gi;
+const PAY_SCAM = /([\w.\-]{2,}@[a-z][\w-]*(?:\.[\w-]+)*)|((?:paypal\.me|venmo\.com|cash\.app|wa\.me|gcash\.me)\/\S+)|(\$[A-Za-z][\w]{2,})|(\+?\d[\d\s().-]{6,}\d)/gi;
+/** Mask payment handles, emails and phone numbers (9+ digits, so sizes, prices and years stay readable). */
+const maskPay = (text: string) => text.replace(PAY_SCAM, (m, _e, _l, _t, phone) => (phone && m.replace(/\D/g, '').length < 9 ? m : '•••'));
 
 /** Room chat runs through this before Nexconn delivers it: mask off-platform payment details and stamp the real name. */
 export function moderateRoomChat(senderId: string, channelId: string, messageType: string, rawContent: string) {
@@ -477,7 +499,7 @@ export function moderateRoomChat(senderId: string, channelId: string, messageTyp
   try { c = JSON.parse(rawContent); } catch { return { pass: 0, extra: 'bad_content' }; }
   const real = (db.prepare('SELECT name FROM buyers WHERE id = ?').get(senderId) as { name: string } | undefined)?.name ?? 'Buyer';
   const text = String(c.text ?? '').slice(0, 200);
-  const masked = text.replace(PAY_SCAM, '•••');
+  const masked = maskPay(text);
   if (masked !== text) logEvent(d.id, 'scam_masked', senderId);
   if (masked === text && c.name === real) return { pass: 1 };
   return { pass: 1, replaceContent: JSON.stringify({ text: masked, name: real, ...(masked !== text ? { masked: true } : {}) }) };
@@ -504,6 +526,12 @@ app.post('/api/nexconn/webhook', express.json({ limit: '1mb' }), (req, res) => {
     const e = data[0] || {};
     return res.json(moderateRoomChat(String(e.userId), String(e.channelId), String(e.messageType), String(e.content ?? '')));
   }
+  if (type === 'direct_channel:pre_messaging') {
+    // Order cards and status lines (CI:*) may only come from a shop: a buyer can't forge "Payment confirmed".
+    const e = data[0] || {};
+    const fake = String(e.messageType ?? '').startsWith('CI:') && !String(e.userId ?? '').startsWith('s_');
+    return res.json(fake ? { pass: 0 } : { pass: 1 });
+  }
   if (type.endsWith(':pre_messaging')) return res.json({ pass: 1 });
   res.json({ ok: true });
 });
@@ -514,27 +542,31 @@ app.get('/api/admin/stats', h((req) => {
   const key = process.env.ADMIN_KEY;
   if (!key || req.header('x-admin-key') !== key) throw new AppError(404, 'NOT_FOUND', 'Not found');
   const one = (sql: string, ...args: unknown[]) => Number(Object.values(db.prepare(sql).get(...(args as any[])) as object)[0] ?? 0);
+  // Real activity only: practice drops and the always-on demo (bots) are excluded everywhere.
+  const REAL = `drop_id IN (SELECT id FROM drops WHERE practice = 0 AND id != 'demo')`;
   const day = 86_400_000;
   const daily = [];
   for (let i = 6; i >= 0; i--) {
     const end = now() - i * day; const start = end - day;
     daily.push({
       day: new Date(end).toISOString().slice(0, 10),
-      activeBuyers: one(`SELECT COUNT(DISTINCT user_id) FROM events WHERE kind IN ('join','claim_attempt') AND at BETWEEN ? AND ?`, start, end),
-      claims: one(`SELECT COUNT(*) FROM events WHERE kind = 'claim_attempt' AND at BETWEEN ? AND ?`, start, end),
+      activeBuyers: one(`SELECT COUNT(DISTINCT user_id) FROM events WHERE kind IN ('join','claim_attempt') AND ${REAL} AND at BETWEEN ? AND ?`, start, end),
+      claims: one(`SELECT COUNT(*) FROM events WHERE kind = 'claim_attempt' AND ${REAL} AND at BETWEEN ? AND ?`, start, end),
     });
   }
   return {
-    sellers: one('SELECT COUNT(*) FROM sellers'),
-    drops: one('SELECT COUNT(*) FROM drops'),
-    itemsDropped: one(`SELECT COUNT(*) FROM items WHERE status != 'draft'`),
-    buyers: one('SELECT COUNT(*) FROM buyers'),
-    buyersWhoJoinedADrop: one(`SELECT COUNT(DISTINCT user_id) FROM events WHERE kind = 'join'`),
-    claimTaps: one(`SELECT COUNT(*) FROM events WHERE kind = 'claim_attempt'`),
-    ordersPaid: one(`SELECT COUNT(*) FROM claims WHERE status = 'paid'`),
-    gmvInr: one(`SELECT COALESCE(SUM(i.price),0) FROM claims c JOIN items i ON i.id = c.item_id WHERE c.status = 'paid'`),
-    joinsViaShares: one(`SELECT COUNT(*) FROM events WHERE kind = 'join' AND ref IS NOT NULL`),
-    scamMessagesMasked: one(`SELECT COUNT(*) FROM events WHERE kind = 'scam_masked'`),
+    sellers: one(`SELECT COUNT(*) FROM sellers WHERE id != 'demoshop'`),
+    drops: one(`SELECT COUNT(*) FROM drops WHERE practice = 0 AND id != 'demo'`),
+    itemsDropped: one(`SELECT COUNT(*) FROM items WHERE status != 'draft' AND ${REAL}`),
+    buyers: one(`SELECT COUNT(*) FROM buyers WHERE id NOT LIKE 'bot\\_%' ESCAPE '\\'`),
+    buyersWhoJoinedADrop: one(`SELECT COUNT(DISTINCT user_id) FROM events WHERE kind = 'join' AND ${REAL}`),
+    claimTaps: one(`SELECT COUNT(*) FROM events WHERE kind = 'claim_attempt' AND ${REAL}`),
+    ordersPaid: one(`SELECT COUNT(*) FROM claims c WHERE c.status = 'paid' AND c.${REAL}`),
+    salesByCurrency: db.prepare(`SELECT s.currency, COALESCE(SUM(i.price),0) AS total FROM claims c JOIN items i ON i.id = c.item_id JOIN drops d ON d.id = c.drop_id
+      JOIN sellers s ON s.id = d.seller_id WHERE c.status = 'paid' AND d.practice = 0 AND d.id != 'demo' GROUP BY s.currency`).all(),
+    joinsViaShares: one(`SELECT COUNT(*) FROM events WHERE kind = 'join' AND ref IS NOT NULL AND ${REAL}`),
+    scamMessagesMasked: one(`SELECT COUNT(*) FROM events WHERE kind = 'scam_masked' AND ${REAL}`),
+    demoVisitors: one(`SELECT COUNT(DISTINCT user_id) FROM events WHERE kind = 'join' AND drop_id = 'demo'`),
     spoofsBlocked: one(`SELECT COUNT(*) FROM events WHERE kind = 'spoof_blocked'`),
     follows: one('SELECT COUNT(*) FROM follows'),
     proWaitlist: one('SELECT COUNT(*) FROM pro_waitlist'),

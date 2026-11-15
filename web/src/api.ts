@@ -1,12 +1,17 @@
 import type { AppConfig, Item, MyClaim, PublicDrop } from '../../shared/types';
 
+export interface BuyerOrders {
+  orders: (MyClaim & { dropId: string; dropTitle: string; sellerId: string; dropLive: boolean })[];
+  following: { id: string; shop: string; liveDrop: string | null; liveTitle: string | null }[];
+}
+
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) { super(message); }
 }
 
 // ---------- local sessions ----------
 
-export interface SellerSession { id: string; key: string; name: string; shop: string; upi: string; currency?: string; payLink?: string | null }
+export interface SellerSession { id: string; key: string; name: string; shop: string; upi: string; currency?: string; payLink?: string | null; payNote?: string | null }
 export interface BuyerSession { id: string; key: string; name: string; isGuest?: boolean }
 
 const read = <T,>(k: string): T | null => {
@@ -120,6 +125,7 @@ export const api = {
   shop: (sellerId: string) => req<Shop>('GET', `/api/shops/${sellerId}`, undefined, 'buyer'),
   follow: (sellerId: string, follow: boolean) => req<{ following: boolean; followers: number }>('POST', `/api/shops/${sellerId}/follow`, { follow }, 'buyer'),
   impact: () => req<Impact>('GET', '/api/impact'),
+  buyerOrders: () => req<BuyerOrders>('GET', '/api/buyer/orders', undefined, 'buyer'),
   proWaitlist: (contact: string) => req('POST', '/api/pro-waitlist', { contact }, 'seller'),
   feedback: (b: { role: 'buyer' | 'seller'; dropId?: string; rating?: number; text?: string; quoteOk?: boolean }) =>
     req('POST', '/api/feedback', b, b.role === 'seller' ? 'seller' : 'buyer'),

@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import {
   Banknote, BellRing, Check, ChevronDown, Clock, MessageCircle, MousePointerClick, Radio, ShieldCheck, Smartphone, Truck, Users, X, Zap,
 } from 'lucide-react';
-import { api, type Impact } from '../api';
+import { api, sessions, type Impact } from '../api';
 import { Avatar, Logo, LogoMark } from '../components/ui';
 import { Counter } from './Impact';
 import { money } from '../util';
@@ -145,6 +145,7 @@ export default function Landing() {
         <nav className="flex items-center gap-1 text-sm font-semibold sm:gap-3">
           <Link to="/pricing" className="hidden rounded-full px-3 py-2 hover:bg-white sm:block">Pricing</Link>
           <Link to="/impact" className="hidden rounded-full px-3 py-2 hover:bg-white sm:block">Impact</Link>
+          {sessions.buyer() && <Link to="/orders" className="rounded-full px-3 py-2 hover:bg-white">My orders</Link>}
           <Link to="/sell" className="btn bg-ink px-4 py-2 text-white">Seller login</Link>
         </nav>
       </header>
@@ -158,13 +159,16 @@ export default function Landing() {
                 <span className="anim-live size-2 rounded-full bg-white" /> Live now: {impact.liveNow[0].shop}
               </Link>
             ) : (
-              <p className="mb-5 inline-flex items-center gap-2 rounded-full bg-hot-soft px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-hot-dark">
-                <Radio className="size-3.5" /> For Instagram, TikTok, Facebook & WhatsApp live sellers
-              </p>
+              <Link to="/d/demo" className="mb-5 inline-flex items-center gap-2 rounded-full bg-hot px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white">
+                <span className="anim-live size-2 rounded-full bg-white" /> Demo drop is live — try to beat the bots →
+              </Link>
             )}
             <h1 className="font-display text-[46px] font-extrabold leading-[0.95] tracking-tight sm:text-7xl">
               “Comment MINE”<br />is broken.<br /><span className="text-hot">Claim it fair.</span>
             </h1>
+            <p className="mt-4 flex items-center gap-2 text-sm font-semibold text-muted">
+              <Radio className="size-4" /> For Instagram, TikTok, Facebook & WhatsApp live sellers
+            </p>
           </div>
           <div className="md:col-start-2 md:row-span-2 md:row-start-1"><PhoneDemo /></div>
           <div className="md:col-start-1 md:row-start-2">
@@ -240,7 +244,7 @@ export default function Landing() {
             {[
               [Users, 'A queue everyone can see', 'Holder, timer and who’s next, updated live on every phone. Fairness people can watch.'],
               [Clock, 'Auto-promotion', 'Unpaid holds pass to the next in line at the time limit you set — no more re-posting.'],
-              [Truck, 'Delivery details built in', 'Phone, address and PIN come with every payment. Export all orders as CSV.'],
+              [Truck, 'Delivery details built in', 'Phone, address and postal code come with every payment. Export all orders as CSV.'],
               [MessageCircle, 'One inbox for every order', 'Chat with each buyer in one place, with order cards in the thread.'],
               [ShieldCheck, 'Scam shield', 'Phone numbers, emails and payment handles are hidden in room chat, and only the real seller gets the Seller badge.'],
               [BellRing, 'Followers for next time', 'Buyers follow your shop and get pinged when your next drop opens.'],

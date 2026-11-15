@@ -14,7 +14,14 @@ export class NexconnError extends Error {
   }
 }
 
-async function call<T = any>(path: string, body: unknown): Promise<T> {
+/** True when the request never reached Nexconn (DNS / connection refused), so a retry can't create a duplicate. */
+const neverSent = (e: unknown) => {
+  const code = (e as { cause?: { code?: string } })?.cause?.code ?? '';
+  return ['ENOTFOUND', 'ECONNREFUSED', 'EAI_AGAIN', 'ECONNRESET', 'UND_ERR_CONNECT_TIMEOUT'].includes(code);
+};
+
+/** Signed Platform API call. Message sends are not idempotent, so they only fail over when the request never left. */
+async function call<T = any>(path: string, body: unknown, idempotent = true): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < 2; attempt++) {
     const host = hosts[hostIdx];
@@ -44,6 +51,7 @@ async function call<T = any>(path: string, body: unknown): Promise<T> {
       // Docs: on timeout or unexpected status, switch to the backup domain.
       if (e instanceof NexconnError && e.code < 500) throw e;
       hostIdx = (hostIdx + 1) % hosts.length;
+      if (!idempotent && !neverSent(e)) throw e; // it may have been delivered: don't send it twice
     }
   }
   throw lastErr;
@@ -89,7 +97,7 @@ export const nexconn = {
     await call('/v4/open-channel/message/send', {
       fromUserId, toChannelIds: [channelId], messageType,
       content: JSON.stringify(content), shouldPersist: 0, isEchoToSender: 1, priority,
-    });
+    }, false);
   },
 
   /** 1:1 message (order card, order updates). Echoed to the sender so the seller's inbox shows it too. */
@@ -103,7 +111,7 @@ export const nexconn = {
       content: JSON.stringify(content), isEchoToSender: 1, shouldPersist: 1,
       ...(pushContent ? { pushContent } : {}),
       ...(metadata ? { hasMetadata: true, metadata } : {}),
-    });
+    }, false);
     return res?.result?.messageIds?.[0]?.messageId ?? null;
   },
 
