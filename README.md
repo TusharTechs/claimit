@@ -53,6 +53,19 @@ npm run build && npm start   # serves the built web app and the API from one Nod
 
 Run it as a single instance with a persistent disk for `DATA_DIR`, because the arbiter relies on one process.
 
+### Deploy to a VM (Google Compute Engine)
+
+`deploy/` holds a small VM deployment. It uses Node 22 under systemd, with Caddy in front for automatic HTTPS. An `sslip.io` hostname means you don't need a domain.
+
+```bash
+# first time: installs Node, Caddy, swap and a service user, then deploys
+GCP_PROJECT=<project> HOST=<ip-with-dashes>.sslip.io ./deploy/deploy.sh --bootstrap
+# every update after that
+GCP_PROJECT=<project> HOST=<ip-with-dashes>.sslip.io ./deploy/deploy.sh
+```
+
+The script builds locally and uploads the app. It writes the `NEXCONN_*` keys from your local `.env` to `/etc/claimit.env` on the VM, readable only by root, and restarts the service. Data lives in `/var/lib/claimit`.
+
 ## Stack
 
 - React, Vite and Tailwind on the web

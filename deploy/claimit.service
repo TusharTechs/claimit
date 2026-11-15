@@ -1,0 +1,17 @@
+[Unit]
+Description=ClaimIt server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=claimit
+WorkingDirectory=/opt/claimit
+EnvironmentFile=/etc/claimit.env
+Environment=NODE_ENV=production
+Environment=NODE_NO_WARNINGS=1
+ExecStart=/opt/claimit/node_modules/.bin/tsx server/index.ts
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
