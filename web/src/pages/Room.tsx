@@ -6,6 +6,7 @@ import { api, ApiError, sessions, type BuyerSession, type Shipping } from '../ap
 import { rt, type RtMessage } from '../rt';
 import { Avatar, ConfirmSheet, ItemThumb, Logo, LogoMark, QR, Sheet, Spinner, celebrate, useToasts } from '../components/ui';
 import { DMThread } from '../components/DMThread';
+import { ensureBuyer, shopIdOf } from '../buyer';
 import { embedUrl, mmss, rupees, upiLink, useCountdown, useDebounced } from '../util';
 import {
   MSG, itemKey,
@@ -19,16 +20,6 @@ type FeedEntry =
 
 type People = Record<string, { name: string; seller?: boolean }>;
 
-// One guest identity per page load, even if effects run twice (React dev) — each guest is a real Nexconn user.
-let guestPromise: Promise<BuyerSession> | null = null;
-function guestOnce(): Promise<BuyerSession> {
-  guestPromise ??= api.createBuyer().then((b) => {
-    const s = { id: b.id, key: b.key, name: b.name, isGuest: b.isGuest };
-    sessions.setBuyer(s);
-    return s;
-  }).catch((e) => { guestPromise = null; throw e; });
-  return guestPromise;
-}
 type Toast = (t: string, tone?: 'hot' | 'mint' | 'ink') => void;
 
 const involves = (s: ItemState | undefined, id: string | undefined) =>
@@ -90,7 +81,7 @@ export default function Room() {
   // Everyone with the link watches immediately as a guest; a name is asked only when they first tap Claim.
   useEffect(() => {
     if (me || !drop) return;
-    guestOnce().then(setMe).catch(() => setError('Could not join the drop. Check your connection.'));
+    ensureBuyer().then(setMe).catch(() => setError('Could not join the drop. Check your connection.'));
   }, [me, drop]);
 
   // Connect to Nexconn and enter the live room.
@@ -109,7 +100,7 @@ export default function Room() {
         setViewers(count);
         applyMeta(metadata);
         setConnected(true);
-        api.join(dropId).catch(() => {});
+        api.join(dropId, new URLSearchParams(location.search).get('r')).catch(() => {});
         loadClaims();
       } catch (e) {
         if (!cancelled && !(e instanceof ApiError && e.status === 401)) toasts.push(e instanceof Error ? e.message : 'Could not connect to the live room', 'hot');
@@ -235,7 +226,7 @@ export default function Room() {
 
   const share = async () => {
     if (!drop) return;
-    const url = `${location.origin}/d/${drop.id}`;
+    const url = `${location.origin}/d/${drop.id}${me ? `?r=${me.id}` : ''}`; // attribution: who brought whom
     const text = `🔴 ${drop.shop} is dropping LIVE — first tap wins, everyone sees the queue.`;
     try {
       if (navigator.share) await navigator.share({ title: drop.shop, text, url });
@@ -256,7 +247,7 @@ export default function Room() {
       {/* Top bar */}
       <header className="flex items-center gap-2.5 px-4 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))]">
         <div className="min-w-0 flex-1">
-          <div className="line-clamp-1 font-display text-lg font-extrabold leading-tight" title={drop.shop}>{drop.shop}</div>
+          <Link to={`/s/${shopIdOf(drop.sellerId)}`} className="line-clamp-1 font-display text-lg font-extrabold leading-tight hover:underline" title={`${drop.shop} — see shop`}>{drop.shop}</Link>
           <div className="line-clamp-1 text-xs text-muted" title={drop.title}>{drop.title}</div>
         </div>
         {ended ? (
@@ -308,7 +299,7 @@ export default function Room() {
           )}
         </div>
 
-        {ended && <EndedCard shop={drop.shop} sold={sold} total={items.length} />}
+        {ended && <EndedCard shop={drop.shop} shopId={shopIdOf(drop.sellerId)} sold={sold} total={items.length} toast={toasts.push} />}
 
         {items.length > 1 && (
           <div className="mt-4">
@@ -595,13 +586,43 @@ function NameSheet({ open, shop, onClose, onDone }: { open: boolean; shop: strin
   );
 }
 
-function EndedCard({ shop, sold, total }: { shop: string; sold: number; total: number }) {
+function EndedCard({ shop, shopId, sold, total, toast }: { shop: string; shopId: string; sold: number; total: number; toast: Toast }) {
+  const [following, setFollowing] = useState(false);
   return (
     <div className="mx-4 mt-3 rounded-[26px] bg-ink p-5 text-white">
       <div className="text-xs font-bold uppercase tracking-wider text-white/60">Drop ended</div>
       <div className="mt-1 font-display text-3xl font-extrabold leading-tight">{shop} sold {sold} of {total}</div>
       <p className="mt-1 text-white/75">Fair and square — every claim was first-come, in front of everyone.</p>
-      <Link to="/sell" className="btn mt-4 bg-hot px-5 py-3 text-white">Run your own drop — free <ChevronRight className="size-4" /></Link>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button className={`btn px-5 py-3 ${following ? 'bg-white/15 text-white' : 'bg-hot text-white'}`} disabled={following} onClick={async () => {
+          try { await ensureBuyer(); await api.follow(shopId, true); setFollowing(true); celebrate({ x: 0.5, y: 0.4 }); toast(`You'll hear when ${shop} drops next`, 'mint'); }
+          catch (e) { toast(e instanceof Error ? e.message : 'Could not follow', 'hot'); }
+        }}>{following ? <><Check className="size-4" /> Following</> : `Follow ${shop} for the next drop`}</button>
+        <Link to="/sell" className="btn bg-white/10 px-5 py-3 text-white">Run your own drop <ChevronRight className="size-4" /></Link>
+      </div>
+    </div>
+  );
+}
+
+function PaidExtras({ c, toast }: { c: MyClaim; toast: Toast }) {
+  const [voted, setVoted] = useState<null | boolean>(null);
+  const share = async () => {
+    const text = `I just claimed “${c.itemName}” from ${c.shop} — fairly, first tap wins 🎉`;
+    const url = location.href.split('?')[0] + (sessions.buyer() ? `?r=${sessions.buyer()!.id}` : '');
+    try { if (navigator.share) await navigator.share({ title: 'ClaimIt', text, url }); else { await navigator.clipboard.writeText(`${text} ${url}`); toast('Copied — paste it in your story'); } } catch { /* cancelled */ }
+  };
+  return (
+    <div className="mt-3 space-y-2">
+      <button className="btn w-full bg-hot-soft py-2.5 text-sm text-hot-dark" onClick={share}><Share2 className="size-4" /> Share your win</button>
+      {voted === null ? (
+        <div className="flex items-center gap-2 rounded-xl bg-paper px-3 py-2 text-sm">
+          <span className="flex-1 font-semibold">Fairer than “comment MINE”?</span>
+          {[true, false].map((v) => (
+            <button key={String(v)} className="btn bg-white px-3 py-1.5 shadow-sm" aria-label={v ? 'Yes' : 'No'}
+              onClick={() => { setVoted(v); api.feedback({ role: 'buyer', rating: v ? 10 : 0 }).catch(() => {}); }}>{v ? '👍' : '👎'}</button>
+          ))}
+        </div>
+      ) : <p className="text-center text-sm text-muted">Thanks for the feedback {voted ? '💚' : '🙏'}</p>}
     </div>
   );
 }
@@ -758,6 +779,7 @@ function OrderCard({ c, buyerName, onChange, toast }: { c: MyClaim; buyerName: s
             onConfirm={() => act(() => api.release(c.id), 'Released to the next person')} />
         </div>
       )}
+      {c.status === 'paid' && <PaidExtras c={c} toast={toast} />}
       {c.status === 'waiting' && (
         <button className="mt-2 w-full py-1 text-center text-sm font-semibold text-muted hover:underline" disabled={busy}
           onClick={() => act(() => api.release(c.id), 'Left the line')}>Leave the line</button>

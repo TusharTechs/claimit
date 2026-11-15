@@ -93,10 +93,11 @@ export const nexconn = {
   },
 
   /** 1:1 message (order card, order updates). Echoed to the sender so the seller's inbox shows it too. */
-  async sendDirect(fromUserId: string, toUserId: string, messageType: string, content: unknown, pushContent?: string) {
-    if (mock) return mockbus.sendDirect(fromUserId, toUserId, messageType, content);
+  async sendDirect(fromUserId: string, toUserId: string, messageType: string, content: unknown, pushContent?: string, toMany?: string[]) {
+    const to = toMany?.length ? toMany : [toUserId];
+    if (mock) { for (const t of to) mockbus.sendDirect(fromUserId, t, messageType, content); return; }
     await call('/v4/direct-channel/message/send', {
-      fromUserId, toUserIds: [toUserId], messageType,
+      fromUserId, toUserIds: to, messageType,
       content: JSON.stringify(content), isEchoToSender: 1, shouldPersist: 1,
       ...(pushContent ? { pushContent } : {}),
     });

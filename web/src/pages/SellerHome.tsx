@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, ApiError, sessions, type SellerDropSummary, type SellerSession } from '../api';
 import { ConfirmSheet, Logo, Spinner } from '../components/ui';
+import { toast } from 'sonner';
 
 export default function SellerHome() {
   const [seller, setSeller] = useState<SellerSession | null>(() => sessions.seller());
@@ -71,10 +72,14 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
       <div className="text-sm font-semibold text-muted">Hi {seller.name} 👋</div>
       <h1 className="font-display text-4xl font-extrabold">{seller.shop}</h1>
       <p className="text-sm text-muted">Payments go to <b className="text-ink-2">{seller.upi}</b></p>
+      <div className="mt-3 flex flex-wrap gap-2 text-sm">
+        <Link to={`/s/${seller.id}`} className="btn bg-white px-4 py-2 shadow-sm">Your shop page ↗</Link>
+        <Link to="/pricing" className="btn bg-white px-4 py-2 shadow-sm">Pricing</Link>
+      </div>
 
       <form className="mt-6 rounded-[26px] border border-line bg-card p-5 shadow-[var(--shadow-card)]" onSubmit={async (e) => {
         e.preventDefault(); setBusy(true); setErr('');
-        try { const d = await api.createDrop({ title, liveUrl, holdMinutes: hold }); nav(`/sell/${d.id}`); }
+        try { const d = await api.createDrop({ title, liveUrl, holdMinutes: hold }); if (d.notified) toast.success(`${d.notified} followers notified`); nav(`/sell/${d.id}`); }
         catch (e2) { setErr(e2 instanceof Error ? e2.message : 'Could not create the drop'); setBusy(false); }
       }}>
         <div className="font-display text-xl font-bold">Start a new drop</div>

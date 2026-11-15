@@ -147,7 +147,14 @@ app.post('/api/seller/drops', h(async (req) => {
   await nexconn.createOpenChannel(channelId);
   db.prepare('INSERT INTO drops (id, seller_id, title, channel_id, status, live_url, created, hold_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
     .run(id, s.id, title, channelId, 'live', liveUrl, now(), hold * 60);
-  return { id };
+  // Tell followers over Nexconn (1:1 message from the shop), in batches of up to 1000 recipients per call.
+  const followers = (db.prepare('SELECT buyer_id FROM follows WHERE seller_id = ?').all(s.id) as { buyer_id: string }[]).map((r) => r.buyer_id);
+  const base = config.publicUrl || `${req.protocol}://${req.get('host')}`;
+  for (let i = 0; i < followers.length; i += 1000) {
+    nexconn.sendDirect(sellerUserId(s.id), '', 'RC:TxtMsg', { content: `🔴 ${s.shop} just opened a new drop: “${title}”. First tap wins → ${base}/d/${id}` },
+      `${s.shop} is dropping live now`, followers.slice(i, i + 1000)).catch((e) => console.error('[notify followers]', e?.message));
+  }
+  return { id, notified: followers.length };
 }));
 
 app.get('/api/seller/drops/:dropId', h(async (req) => {
@@ -172,6 +179,8 @@ app.get('/api/seller/drops/:dropId', h(async (req) => {
       claimers: count('claim_attempt', true),
       sold: items.filter((i) => i.status === 'sold').length,
       revenue,
+      viaShares: (db.prepare(`SELECT COUNT(DISTINCT user_id) AS n FROM events WHERE drop_id = ? AND kind = 'join' AND ref IS NOT NULL`).get(d.id) as { n: number }).n,
+      followers: (db.prepare('SELECT COUNT(*) AS n FROM follows WHERE seller_id = ?').get(d.seller_id) as { n: number }).n,
     },
   };
 }));
@@ -275,8 +284,81 @@ app.post('/api/drops/:dropId/join', h((req) => {
   const b = buyer(req);
   const d = q.drop(String(req.params.dropId));
   if (!d) throw new AppError(404, 'NO_DROP', 'Drop not found');
+  const ref = typeof req.body.ref === 'string' && /^b_[a-z0-9]{6,16}$/.test(req.body.ref) && req.body.ref !== b.id ? req.body.ref : null;
   const seen = db.prepare(`SELECT 1 FROM events WHERE drop_id = ? AND kind = 'join' AND user_id = ? AND at > ?`).get(d.id, b.id, now() - 30 * 60_000);
-  if (!seen) logEvent(d.id, 'join', b.id);
+  if (!seen) db.prepare('INSERT INTO events (drop_id, kind, user_id, at, ref) VALUES (?, ?, ?, ?, ?)').run(d.id, 'join', b.id, now(), ref);
+}));
+
+// ---------- shops, follow, impact, pricing waitlist, feedback ----------
+
+function optionalBuyer(req: Request) {
+  try { return buyer(req); } catch { return null; }
+}
+
+app.get('/api/shops/:sellerId', h((req) => {
+  const s = q.seller(String(req.params.sellerId));
+  if (!s) throw new AppError(404, 'NO_SHOP', 'Shop not found');
+  const b = optionalBuyer(req);
+  const drops = db.prepare(`SELECT d.id, d.title, d.status, d.created,
+      (SELECT COUNT(*) FROM items i WHERE i.drop_id = d.id AND i.status != 'draft') AS items,
+      (SELECT COUNT(*) FROM items i WHERE i.drop_id = d.id AND i.status = 'sold') AS sold,
+      (SELECT image_id FROM items i WHERE i.drop_id = d.id AND i.image_id IS NOT NULL ORDER BY i.idx LIMIT 1) AS cover
+    FROM drops d WHERE d.seller_id = ? ORDER BY d.created DESC LIMIT 30`).all(s.id) as { cover: string | null }[];
+  const count = (sql: string) => Number(Object.values(db.prepare(sql).get(s.id) as object)[0] ?? 0);
+  return {
+    id: s.id, shop: s.shop, name: s.name,
+    followers: count('SELECT COUNT(*) FROM follows WHERE seller_id = ?'),
+    orders: count(`SELECT COUNT(*) FROM claims c JOIN drops d ON d.id = c.drop_id WHERE d.seller_id = ? AND c.status = 'paid'`),
+    since: Number(Object.values(db.prepare('SELECT created FROM sellers WHERE id = ?').get(s.id) as object)[0]),
+    following: b ? !!db.prepare('SELECT 1 FROM follows WHERE seller_id = ? AND buyer_id = ?').get(s.id, b.id) : false,
+    drops: drops.map((d) => ({ ...d, cover: d.cover ? `/img/${d.cover}` : null })),
+  };
+}));
+
+app.post('/api/shops/:sellerId/follow', h((req) => {
+  const b = buyer(req);
+  const s = q.seller(String(req.params.sellerId));
+  if (!s) throw new AppError(404, 'NO_SHOP', 'Shop not found');
+  if (req.body.follow === false) db.prepare('DELETE FROM follows WHERE seller_id = ? AND buyer_id = ?').run(s.id, b.id);
+  else db.prepare('INSERT OR IGNORE INTO follows (seller_id, buyer_id, created) VALUES (?, ?, ?)').run(s.id, b.id, now());
+  return { following: req.body.follow !== false, followers: Number(Object.values(db.prepare('SELECT COUNT(*) FROM follows WHERE seller_id = ?').get(s.id) as object)[0]) };
+}));
+
+/** Public, aggregate-only numbers (no personal data) — shown on /impact and the landing page. */
+let impactCache: { at: number; data: unknown } | null = null;
+app.get('/api/impact', h(() => {
+  if (impactCache && Date.now() - impactCache.at < 30_000) return impactCache.data;
+  const one = (sql: string) => Number(Object.values(db.prepare(sql).get() as object)[0] ?? 0);
+  const data = {
+    sellers: one(`SELECT COUNT(DISTINCT seller_id) FROM drops`),
+    drops: one('SELECT COUNT(*) FROM drops'),
+    buyers: one(`SELECT COUNT(DISTINCT user_id) FROM events WHERE kind = 'join'`),
+    claimsSettled: one(`SELECT COUNT(*) FROM claims WHERE status IN ('paid','expired','cancelled','rejected')`),
+    contestedItems: one(`SELECT COUNT(*) FROM (SELECT item_id FROM claims GROUP BY item_id HAVING COUNT(*) > 1)`),
+    itemsSold: one(`SELECT COUNT(*) FROM items WHERE status = 'sold'`),
+    gmvInr: one(`SELECT COALESCE(SUM(i.price),0) FROM claims c JOIN items i ON i.id = c.item_id WHERE c.status = 'paid'`),
+    liveNow: (db.prepare(`SELECT d.id, d.title, s.shop FROM drops d JOIN sellers s ON s.id = d.seller_id
+      WHERE d.status = 'live' AND EXISTS (SELECT 1 FROM items i WHERE i.drop_id = d.id AND i.status != 'draft') ORDER BY d.created DESC LIMIT 5`).all()),
+  };
+  impactCache = { at: Date.now(), data };
+  return data;
+}));
+
+app.post('/api/pro-waitlist', limit('waitlist', 20, 60 * 60_000), h((req) => {
+  const contact = str(req.body.contact, 120, 'Phone or email');
+  if (!/^(\S+@\S+\.\S+|\+?\d[\d\s-]{8,})$/.test(contact)) throw new AppError(400, 'BAD_CONTACT', 'Enter a phone number or email');
+  const s = req.header('x-seller-id') ? (() => { try { return seller(req).id; } catch { return null; } })() : null;
+  db.prepare('INSERT INTO pro_waitlist (seller_id, contact, created) VALUES (?, ?, ?)').run(s, contact, now());
+  return { ok: true };
+}));
+
+app.post('/api/feedback', limit('feedback', 30, 60 * 60_000), h((req) => {
+  const role = req.body.role === 'seller' ? 'seller' : 'buyer';
+  const who = role === 'seller' ? (() => { try { return seller(req).id; } catch { return null; } })() : optionalBuyer(req)?.id ?? null;
+  const rating = Number.isFinite(Number(req.body.rating)) ? Math.max(0, Math.min(10, Math.round(Number(req.body.rating)))) : null;
+  db.prepare('INSERT INTO feedback (drop_id, role, user_id, rating, text, quote_ok, created) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(str(req.body.dropId, 20, 'drop', false) || null, role, who, rating, str(req.body.text, 500, 'text', false) || null, req.body.quoteOk ? 1 : 0, now());
+  return { ok: true };
 }));
 
 /** Display names for room senders, resolved server-side so nobody can chat as the seller by faking a name. */
@@ -351,6 +433,10 @@ app.get('/api/admin/stats', h((req) => {
     claimTaps: one(`SELECT COUNT(*) FROM events WHERE kind = 'claim_attempt'`),
     ordersPaid: one(`SELECT COUNT(*) FROM claims WHERE status = 'paid'`),
     gmvInr: one(`SELECT COALESCE(SUM(i.price),0) FROM claims c JOIN items i ON i.id = c.item_id WHERE c.status = 'paid'`),
+    joinsViaShares: one(`SELECT COUNT(*) FROM events WHERE kind = 'join' AND ref IS NOT NULL`),
+    follows: one('SELECT COUNT(*) FROM follows'),
+    proWaitlist: one('SELECT COUNT(*) FROM pro_waitlist'),
+    feedback: db.prepare('SELECT role, rating, text, quote_ok AS quoteOk, created FROM feedback ORDER BY created DESC LIMIT 50').all(),
     last7Days: daily,
   };
 }));

@@ -61,7 +61,14 @@ export interface SellerDrop {
   drop: PublicDrop;
   items: Item[];
   claims: SellerClaim[];
-  stats: { viewers: number; claimAttempts: number; claimers: number; sold: number; revenue: number };
+  stats: { viewers: number; claimAttempts: number; claimers: number; sold: number; revenue: number; viaShares: number; followers: number };
+}
+
+export interface ShopDrop { id: string; title: string; status: 'live' | 'ended'; created: number; items: number; sold: number; cover: string | null }
+export interface Shop { id: string; shop: string; name: string; followers: number; orders: number; since: number; following: boolean; drops: ShopDrop[] }
+export interface Impact {
+  sellers: number; drops: number; buyers: number; claimsSettled: number; contestedItems: number; itemsSold: number; gmvInr: number;
+  liveNow: { id: string; title: string; shop: string }[];
 }
 
 export const api = {
@@ -73,7 +80,7 @@ export const api = {
   sellerDrops: () => req<SellerDropSummary[]>('GET', '/api/seller/drops', undefined, 'seller'),
   sellerProfiles: (ids: string[]) =>
     req<{ userId: string; name: string }[]>('GET', `/api/seller/profiles?ids=${encodeURIComponent(ids.join(','))}`, undefined, 'seller'),
-  createDrop: (b: { title: string; liveUrl?: string; holdMinutes?: number }) => req<{ id: string }>('POST', '/api/seller/drops', b, 'seller'),
+  createDrop: (b: { title: string; liveUrl?: string; holdMinutes?: number }) => req<{ id: string; notified: number }>('POST', '/api/seller/drops', b, 'seller'),
   /** Validate a seller id/key pair (used by the "open on another device" link) without storing it first. */
   sellerLogin: async (id: string, key: string) => {
     const res = await fetch('/api/seller/session', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-seller-id': id, 'x-seller-key': key }, body: '{}' });
@@ -107,7 +114,13 @@ export const api = {
   people: (dropId: string, ids: string[]) =>
     req<Record<string, { name: string; seller?: boolean }>>('GET', `/api/drops/${dropId}/people?ids=${encodeURIComponent(ids.join(','))}`),
   drop: (id: string) => req<PublicDrop>('GET', `/api/drops/${id}`),
-  join: (id: string) => req('POST', `/api/drops/${id}/join`, {}, 'buyer'),
+  join: (id: string, ref?: string | null) => req('POST', `/api/drops/${id}/join`, { ref: ref ?? null }, 'buyer'),
+  shop: (sellerId: string) => req<Shop>('GET', `/api/shops/${sellerId}`, undefined, 'buyer'),
+  follow: (sellerId: string, follow: boolean) => req<{ following: boolean; followers: number }>('POST', `/api/shops/${sellerId}/follow`, { follow }, 'buyer'),
+  impact: () => req<Impact>('GET', '/api/impact'),
+  proWaitlist: (contact: string) => req('POST', '/api/pro-waitlist', { contact }, 'seller'),
+  feedback: (b: { role: 'buyer' | 'seller'; dropId?: string; rating?: number; text?: string; quoteOk?: boolean }) =>
+    req('POST', '/api/feedback', b, b.role === 'seller' ? 'seller' : 'buyer'),
   myClaims: (id: string) => req<MyClaim[]>('GET', `/api/drops/${id}/me`, undefined, 'buyer'),
   claim: (dropId: string, itemId: string) => req<MyClaim>('POST', `/api/drops/${dropId}/items/${itemId}/claim`, {}, 'buyer'),
   markPaid: (claimId: string, b: Shipping & { utr: string }) => req('POST', `/api/claims/${claimId}/paid`, b, 'buyer'),

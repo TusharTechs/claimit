@@ -6,6 +6,10 @@ import Landing from './pages/Landing';
 import SellerHome from './pages/SellerHome';
 import SellerConsole from './pages/SellerConsole';
 import SellerLogin from './pages/SellerLogin';
+import Shop from './pages/Shop';
+import Pricing from './pages/Pricing';
+import Impact from './pages/Impact';
+import Legal from './pages/Legal';
 import Room from './pages/Room';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Toaster } from 'sonner';
@@ -22,6 +26,11 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/sell/login" element={<SellerLogin />} />
         <Route path="/sell/:dropId" element={<SellerConsole />} />
         <Route path="/d/:dropId" element={<Room />} />
+        <Route path="/s/:sellerId" element={<Shop />} />
+        <Route path="/pricing" element={<Pricing />} />
+        <Route path="/impact" element={<Impact />} />
+        <Route path="/privacy" element={<Legal page="privacy" />} />
+        <Route path="/terms" element={<Legal page="terms" />} />
         <Route path="*" element={<Landing />} />
       </Routes>
     </BrowserRouter>

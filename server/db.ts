@@ -101,6 +101,31 @@ addColumn('buyers', 'is_guest', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('claims', 'ship_phone', 'TEXT');
 addColumn('claims', 'ship_address', 'TEXT');
 addColumn('claims', 'ship_pincode', 'TEXT');
+addColumn('events', 'ref', 'TEXT');
+db.exec(`
+CREATE TABLE IF NOT EXISTS follows (
+  seller_id TEXT NOT NULL REFERENCES sellers(id),
+  buyer_id TEXT NOT NULL REFERENCES buyers(id),
+  created INTEGER NOT NULL,
+  PRIMARY KEY (seller_id, buyer_id)
+);
+CREATE TABLE IF NOT EXISTS pro_waitlist (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  seller_id TEXT,
+  contact TEXT NOT NULL,
+  created INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS feedback (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  drop_id TEXT,
+  role TEXT NOT NULL,
+  user_id TEXT,
+  rating INTEGER,
+  text TEXT,
+  quote_ok INTEGER NOT NULL DEFAULT 0,
+  created INTEGER NOT NULL
+);
+`);
 
 export function tx<T>(fn: () => T): T {
   db.exec('BEGIN IMMEDIATE');

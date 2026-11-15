@@ -173,8 +173,8 @@ export default function SellerConsole() {
                   {[2, 3, 5, 10, 15].map((m) => <option key={m} value={m}>{m} min</option>)}
                 </select>
               </label>
-              <div className="mt-3 grid grid-cols-4 gap-2 text-center">
-                {[['Joined', stats.viewers], ['Claim taps', stats.claimAttempts], ['Sold', stats.sold], ['Revenue', rupees(stats.revenue)]].map(([k, v]) => (
+              <div className="mt-3 grid grid-cols-3 gap-2 text-center sm:grid-cols-6">
+                {[['Joined', stats.viewers], ['Via shares', stats.viaShares], ['Claim taps', stats.claimAttempts], ['Sold', stats.sold], ['Revenue', rupees(stats.revenue)], ['Followers', stats.followers]].map(([k, v]) => (
                   <div key={k as string} className="rounded-xl bg-paper px-1 py-2">
                     <div className="font-display text-lg font-extrabold leading-none">{v}</div>
                     <div className="mt-1 text-[11px] text-muted">{k}</div>
