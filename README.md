@@ -2,11 +2,11 @@
 
 **Fair live drops for social sellers.** "Comment MINE to buy" turns into a first-come claim queue that every viewer can see. It ends in a paid order.
 
-Thousands of small sellers in India run Instagram and YouTube lives and WhatsApp "drops". Today that means scrolling comments, double claims, fights over who was first, and chasing payment in DMs. ClaimIt replaces that with:
+Millions of social sellers run live sales on Instagram, TikTok, Facebook, YouTube and WhatsApp: thrift stores, boutiques, jewellers, plant shops and collectors, from the US to the Philippines to India. Their checkout is still "comment SOLD" or "comment MINE". That means scrolling comments, double claims, fights over who was first, and chasing payment in DMs. ClaimIt replaces that with:
 
 1. **One link.** The seller shares it to their story or group. Buyers join in a tap, with no app and no password.
 2. **One Claim button.** The first tap wins. Everyone sees "Held by Priya · 4:12 · 2 in line".
-3. **Automatic checkout.** The winner gets a private order chat with the seller's UPI link and a timer. If they don't pay in time, the next person in line is promoted automatically, live, in front of the room.
+3. **Checkout in chat.** The winner gets a private order chat with the seller's payment link (PayPal, Stripe, GCash, UPI and others) and a timer. If they don't pay in time, the next person in line is promoted automatically, live, in front of the room.
 
 ## How it uses Nexconn
 
@@ -15,7 +15,7 @@ Thousands of small sellers in India run Instagram and YouTube lives and WhatsApp
 | Live drop room for any number of viewers | **Open channel**, created server-side for each drop and joined through the Web Chat SDK |
 | Live claim queue that every viewer sees update at the same moment | **Open channel metadata (KV)**, written by the server arbiter with per-item versions; clients use `onMetadataChanged` |
 | Drops and claim events always get through, fan chat is dropped first under load | **Priority message types** (`CI:Drop`, `CI:Event`) plus a **low-priority type** (`CI:Chat`), registered by `npm run setup:nexconn`; server sends use `priority: 2` |
-| Anti-scam room chat: phone numbers and UPI IDs masked, sender names forced to their real value | **Pre-message webhook** (`open_channel:pre_messaging`): Nexconn holds each message until our server passes or rewrites it |
+| Anti-scam room chat: phone numbers, emails and payment handles masked, and sender names forced to their real value | **Pre-message webhook** (`open_channel:pre_messaging`): Nexconn holds each message until our server passes or rewrites it |
 | Presence-aware queue: offline buyers are skipped, and a holder who leaves loses the hold early | **User connection-status webhook** (`user:connection_status`) |
 | Order card whose status updates in place (waiting for payment, then paid, then confirmed) | **Direct channel** custom message `CI:Order`, sent with `hasMetadata`; the server updates it through **message metadata** (`/v4/channel-type/message/metadata/set`), and clients use `onMessageMetadataUpdated` |
 | Buyer and seller order chat | Direct channel: text through the SDK, plus `CI:OrderUpd` status messages |
@@ -34,7 +34,7 @@ The **claim arbiter** runs on the app server. Every state change is a single syn
 
 **Notes on scope:**
 
-- Payment is a direct UPI transfer to the seller. The buyer taps "I've paid" and adds an optional transaction ID, then the seller confirms in one tap. ClaimIt never holds money.
+- Shops choose a currency. Buyers pay the seller directly, by UPI or the seller's own payment link (PayPal.me, Venmo, Stripe, GCash and others). The buyer taps "I've paid" and adds an optional transaction ID, then the seller confirms in one tap. ClaimIt never holds money.
 - Low-priority shedding is a Nexconn server behaviour under load (more than about 40 messages per 200 ms in a room). ClaimIt configures it but doesn't simulate floods.
 
 ## Run locally

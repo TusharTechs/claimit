@@ -3,9 +3,9 @@ import { Link } from 'react-router-dom';
 import { animate, motion, useMotionValue, useTransform } from 'motion/react';
 import { api, type Impact as ImpactT } from '../api';
 import { Logo, Spinner } from '../components/ui';
-import { rupees } from '../util';
+import { money } from '../util';
 
-export function Counter({ value, format = (n: number) => n.toLocaleString('en-IN') }: { value: number; format?: (n: number) => string }) {
+export function Counter({ value, format = (n: number) => n.toLocaleString('en') }: { value: number; format?: (n: number) => string }) {
   const mv = useMotionValue(0);
   const text = useTransform(mv, (v) => format(Math.round(v)));
   useEffect(() => { const c = animate(mv, value, { duration: 1.2, ease: 'easeOut' }); return () => c.stop(); }, [value, mv]);
@@ -25,7 +25,7 @@ export default function Impact() {
     ['Items claimed & sold', d.itemsSold, 'every one to exactly one buyer'],
     ['Contested items settled fairly', d.contestedItems, 'items where 2+ people raced — 0 double-claims'],
     ['Claims resolved', d.claimsSettled, 'paid, released or auto-promoted to the next in line'],
-    ['Sales through drops', d.gmvInr, 'paid straight to sellers’ UPI, 0% commission', rupees],
+    ['Sales through drops (≈ USD)', d.gmvUsd, 'paid straight to sellers in their own currency, 0% commission', (n: number) => money(n, 'USD')],
     ['Sellers running drops', d.sellers, `${d.drops} drops so far`],
   ] : [];
   return (

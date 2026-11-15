@@ -6,7 +6,7 @@ export class ApiError extends Error {
 
 // ---------- local sessions ----------
 
-export interface SellerSession { id: string; key: string; name: string; shop: string; upi: string }
+export interface SellerSession { id: string; key: string; name: string; shop: string; upi: string; currency?: string; payLink?: string | null }
 export interface BuyerSession { id: string; key: string; name: string; isGuest?: boolean }
 
 const read = <T,>(k: string): T | null => {
@@ -67,7 +67,7 @@ export interface SellerDrop {
 export interface ShopDrop { id: string; title: string; status: 'live' | 'ended'; created: number; items: number; sold: number; cover: string | null }
 export interface Shop { id: string; shop: string; name: string; followers: number; orders: number; since: number; following: boolean; drops: ShopDrop[] }
 export interface Impact {
-  sellers: number; drops: number; buyers: number; claimsSettled: number; contestedItems: number; itemsSold: number; gmvInr: number;
+  sellers: number; drops: number; buyers: number; claimsSettled: number; contestedItems: number; itemsSold: number; gmvUsd: number;
   liveNow: { id: string; title: string; shop: string }[];
 }
 
@@ -76,7 +76,7 @@ export const api = {
 
   markShipped: (claimId: string, tracking: string) => req('POST', `/api/seller/claims/${claimId}/shipped`, { tracking }, 'seller'),
   practiceDrop: () => req<{ id: string }>('POST', '/api/seller/practice', {}, 'seller'),
-  createSeller: (b: { name: string; shop: string; upi: string; phone?: string }) =>
+  createSeller: (b: { name: string; shop: string; upi: string; phone?: string; currency?: string }) =>
     req<SellerSession & { userId: string; token: string }>('POST', '/api/sellers', b),
   sellerSession: () => req<SellerSession & { userId: string; token: string }>('POST', '/api/seller/session', {}, 'seller'),
   sellerDrops: () => req<SellerDropSummary[]>('GET', '/api/seller/drops', undefined, 'seller'),

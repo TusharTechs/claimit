@@ -12,6 +12,9 @@ import {
   type MyClaim, type OrderContent, type OrderUpdateContent, type Person, type PublicDrop,
 } from '../shared/types.ts';
 
+export const fmtMoney = (n: number, currency = 'INR') =>
+  new Intl.NumberFormat('en', { style: 'currency', currency, maximumFractionDigits: Number.isInteger(n) ? 0 : 2 }).format(n);
+
 export class AppError extends Error {
   constructor(public status: number, public code: string, message: string) { super(message); }
 }
@@ -19,7 +22,7 @@ export class AppError extends Error {
 interface DropRow { id: string; seller_id: string; title: string; channel_id: string; status: 'live' | 'ended'; live_url: string | null; current_item: string | null; hold_seconds: number | null }
 interface ItemRow { id: string; drop_id: string; name: string; price: number; image_id: string | null; status: ItemStatus; idx: number; dropped_at: number | null; version: number }
 interface ClaimRow { id: string; item_id: string; drop_id: string; buyer_id: string; buyer_name: string; status: ClaimStatus; seq: number; hold_until: number | null; utr: string | null; order_msg_id: string | null }
-interface SellerRow { id: string; name: string; shop: string; upi: string }
+interface SellerRow { id: string; name: string; shop: string; upi: string; currency: string; pay_link: string | null }
 
 export const sellerUserId = (sellerId: string) => `s_${sellerId}`;
 /** Demo-room bot buyers: never messaged, never connected to Nexconn. */
@@ -33,7 +36,7 @@ export const q = {
   drop: (id: string) => db.prepare('SELECT * FROM drops WHERE id = ?').get(id) as DropRow | undefined,
   item: (id: string) => db.prepare('SELECT * FROM items WHERE id = ?').get(id) as ItemRow | undefined,
   items: (dropId: string) => db.prepare('SELECT * FROM items WHERE drop_id = ? ORDER BY idx').all(dropId) as unknown as ItemRow[],
-  seller: (id: string) => db.prepare('SELECT id, name, shop, upi FROM sellers WHERE id = ?').get(id) as SellerRow | undefined,
+  seller: (id: string) => db.prepare('SELECT id, name, shop, upi, currency, pay_link FROM sellers WHERE id = ?').get(id) as SellerRow | undefined,
   claim: (id: string) => db.prepare('SELECT * FROM claims WHERE id = ?').get(id) as ClaimRow | undefined,
   activeClaims: (itemId: string) =>
     db.prepare(`SELECT * FROM claims WHERE item_id = ? AND status IN ('holding','paying','waiting') ORDER BY seq`).all(itemId) as unknown as ClaimRow[],
@@ -71,7 +74,7 @@ export function publicDrop(dropId: string): PublicDrop {
     id: d.id, title: d.title, shop: s.shop, sellerId: sellerUserId(s.id), channelId: d.channel_id,
     status: d.status, liveUrl: d.live_url, holdSeconds: holdSecondsFor(d.id),
     items: items.filter((i) => i.status !== 'draft').map(toItem),
-    state, drop: { status: d.status, current: d.current_item }, demo: d.id === 'demo',
+    state, drop: { status: d.status, current: d.current_item }, demo: d.id === 'demo', currency: s.currency,
   };
 }
 
@@ -85,7 +88,7 @@ export function myClaims(dropId: string, buyerId: string): MyClaim[] {
     if (c.status === 'waiting') position = q.activeClaims(c.item_id).filter((x) => x.status === 'waiting').findIndex((x) => x.id === c.id) + 1;
     return {
       id: c.id, itemId: c.item_id, itemName: c.item_name, price: c.price, image: imageUrl(c.image_id),
-      status: c.status, position, holdUntil: c.hold_until, upi: s.upi, shop: s.shop,
+      status: c.status, position, holdUntil: c.hold_until, upi: s.upi, shop: s.shop, currency: s.currency, payLink: s.pay_link,
       shippedAt: (c as any).shipped_at ?? null, tracking: (c as any).tracking ?? null,
     };
   });
@@ -125,7 +128,7 @@ function sendOrder(claimId: string) {
   const s = q.seller(d.seller_id)!;
   const order: OrderContent = {
     claimId: c.id, dropId: d.id, itemId: it.id, itemName: it.name, price: it.price,
-    image: imageUrl(it.image_id), upi: s.upi, shop: s.shop, holdUntil: c.hold_until || now(),
+    image: imageUrl(it.image_id), upi: s.upi, shop: s.shop, holdUntil: c.hold_until || now(), currency: s.currency, payLink: s.pay_link,
   };
   return enqueue(`dm:${c.buyer_id}`, async () => {
     const id = await nexconn.sendDirect(sellerUserId(s.id), c.buyer_id, MSG.ORDER, order,
@@ -281,7 +284,7 @@ export function buyerMarkPaid(claimId: string, buyerId: string, utr: string, shi
   publish(c.drop_id, [c.item_id]);
   roomEvent(c.drop_id, { kind: 'paying', itemId: it.id, itemName: it.name, actor: c.buyer_name, text: `${c.buyer_name} paid for ${it.name} — seller is confirming` });
   sendOrderUpdate(claimId, 'buyer',
-    `💸 Paid ₹${it.price} for ${it.name}${utr ? ` · UPI ref ${utr}` : ''}\n📦 Ship to ${c.buyer_name}, ${ship.address} — ${ship.pincode} · ${ship.phone}`);
+    `💸 Paid ${fmtMoney(it.price, q.seller(q.drop(c.drop_id)!.seller_id)!.currency)} for ${it.name}${utr ? ` · ref ${utr}` : ''}\n📦 Ship to ${c.buyer_name}, ${ship.address} — ${ship.pincode} · ${ship.phone}`);
 }
 
 export function sellerConfirm(claimId: string, sellerId: string) {

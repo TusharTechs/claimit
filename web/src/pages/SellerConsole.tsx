@@ -6,7 +6,7 @@ import { Avatar, ConfirmSheet, CopyButton, ItemThumb, Logo, QR, Sheet, Spinner, 
 import { Play } from 'lucide-react';
 import { DMThread } from '../components/DMThread';
 import { chatUIReady, mountChatUI, openDirect, setupChatUI } from '../chatui';
-import { mmss, resizeImage, rupees, useCountdown, useDebounced } from '../util';
+import { currencySymbol, mmss, resizeImage, rupees, setCurrency, useCountdown, useDebounced } from '../util';
 import { MSG, type ChatContent, type EventContent, type Item } from '../../../shared/types';
 
 type Tab = 'pay' | 'room' | 'inbox';
@@ -33,6 +33,7 @@ export default function SellerConsole() {
   const load = useCallback(async () => {
     try {
       const d = await api.sellerDrop(dropId);
+      setCurrency(d.drop.currency);
       setData(d);
       if (typeof d.drop.inRoom === 'number' && d.drop.inRoom > 0) setViewers(d.drop.inRoom);
     }
@@ -327,7 +328,7 @@ export default function SellerConsole() {
         body="Buyers won't be able to claim anything else. Orders already claimed stay as they are." confirmLabel="End drop"
         onConfirm={() => act(() => api.endDrop(drop.id), 'Drop ended — here is your recap')} />
       <ConfirmSheet open={!!confirmPay} onClose={() => setConfirmPay(null)} title={`Did ₹${items.find((i) => i.id === confirmPay?.itemId)?.price ?? ''} arrive?`} tone="mint"
-        body={<>Check your UPI app for a payment from <b>{confirmPay?.buyerName}</b>{confirmPay?.utr ? <> with reference <b>{confirmPay.utr}</b></> : null}. Confirming marks the item sold and tells the buyer.</>}
+        body={<>Check your payment app for a payment from <b>{confirmPay?.buyerName}</b>{confirmPay?.utr ? <> with reference <b>{confirmPay.utr}</b></> : null}. Confirming marks the item sold and tells the buyer.</>}
         confirmLabel="Yes, payment received" onConfirm={() => confirmPay && act(() => api.confirm(confirmPay.id), `Sold to ${confirmPay.buyerName} ✓`)} />
       <ConfirmSheet open={!!confirmSkip} onClose={() => setConfirmSkip(null)} title={`Skip ${confirmSkip?.buyerName}?`} tone="ink"
         body="The item goes to the next person in line straight away and they get the order card." confirmLabel="Give it to the next person"
@@ -397,8 +398,8 @@ function AddItem({ dropId, onAdded, toast }: { dropId: string; onAdded: () => vo
           <input id="item-name" ref={nameRef} className="input" placeholder="Item name, size" value={name} onChange={(e) => setName(e.target.value)} required maxLength={80} />
         </div>
         <div className="w-28">
-          <label htmlFor="item-price" className="sr-only">Price in rupees</label>
-          <input id="item-price" className="input" placeholder="₹ Price" inputMode="numeric" value={price} onChange={(e) => setPrice(e.target.value.replace(/[^\d]/g, ''))} required />
+          <label htmlFor="item-price" className="sr-only">Price</label>
+          <input id="item-price" className="input" placeholder={`${currencySymbol()} Price`} inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value.replace(/[^\d.]/g, ''))} required />
         </div>
         <button className="btn bg-ink px-5 py-3 text-white" disabled={busy || !name.trim() || !price}>{busy ? <Spinner /> : 'Add'}</button>
       </div>
@@ -472,7 +473,7 @@ function ShipButton({ c }: { c: SellerClaim }) {
           catch (err) { toasts.push(err instanceof Error ? err.message : 'Failed', 'hot'); }
         }}>
           <label htmlFor={`trk-${c.id}`} className="block text-sm font-semibold">Courier & tracking number <span className="font-normal text-muted">(optional)</span></label>
-          <input id={`trk-${c.id}`} data-autofocus className="input mt-1" placeholder="e.g. Delhivery 1234567890" value={tracking} onChange={(e) => setTracking(e.target.value)} maxLength={120} />
+          <input id={`trk-${c.id}`} data-autofocus className="input mt-1" placeholder="e.g. DHL 1234567890" value={tracking} onChange={(e) => setTracking(e.target.value)} maxLength={120} />
           <button className="btn mt-4 w-full bg-ink py-3 text-white">Mark shipped & notify</button>
         </form>
       </Sheet>

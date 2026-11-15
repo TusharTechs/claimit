@@ -1,6 +1,17 @@
 import { useEffect, useState } from 'react';
 
-export const rupees = (n: number) => `₹${n.toLocaleString('en-IN')}`;
+// Prices are shown in the shop's currency. Pages set it once when the drop/shop loads.
+let currentCurrency = 'INR';
+export const setCurrency = (c?: string | null) => { if (c) currentCurrency = c; };
+export const money = (n: number, currency = currentCurrency) => {
+  try {
+    return new Intl.NumberFormat(currency === 'INR' ? 'en-IN' : 'en', { style: 'currency', currency, maximumFractionDigits: Number.isInteger(n) ? 0 : 2 }).format(n);
+  } catch { return `${currency} ${n}`; }
+};
+/** Kept for existing call sites: formats in the current shop currency. */
+export const rupees = (n: number) => money(n);
+export const currencySymbol = (currency = currentCurrency) =>
+  (new Intl.NumberFormat('en', { style: 'currency', currency }).formatToParts(0).find((p) => p.type === 'currency')?.value) ?? currency;
 
 export function upiLink(upi: string, shop: string, amount: number, note: string) {
   const p = new URLSearchParams({ pa: upi, pn: shop, am: String(amount), cu: 'INR', tn: note.slice(0, 50) });
@@ -25,7 +36,7 @@ export const mmss = (ms: number) => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
 
-/** Resize a picked photo to max 900px JPEG so uploads stay small on Indian mobile data. */
+/** Resize a picked photo to max 900px JPEG so uploads stay small on slow mobile data. */
 export function resizeImage(file: File, max = 900): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();

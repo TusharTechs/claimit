@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { rt, type RtMessage } from '../rt';
 import { MSG, ORDER_STATUS, type OrderContent, type OrderUpdateContent } from '../../../shared/types';
-import { rupees } from '../util';
+import { money } from '../util';
 
 /** 1:1 Direct channel between a buyer and the seller: order cards, status updates and free text. */
 export function DMThread({ peerId, peerName, onActivity, compact = false }: {
@@ -74,7 +74,7 @@ function Bubble({ m }: { m: RtMessage }) {
           {o.image && <img src={o.image} alt="" className="size-12 rounded-xl object-cover" />}
           <div className="min-w-0">
             <div className="truncate font-semibold">{o.itemName}</div>
-            <div className="text-sm text-ink-2">{rupees(o.price)} · pay to {o.upi}</div>
+            <div className="text-sm text-ink-2">{money(o.price, o.currency)} · {o.upi ? `UPI ${o.upi}` : 'payment link'}</div>
           </div>
         </div>
       </div>

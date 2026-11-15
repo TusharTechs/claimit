@@ -4,7 +4,7 @@ import type { NCChatUIApplication } from '@nexconn/chatui';
 import { MSG, ORDER_STATUS, type OrderContent, type OrderUpdateContent } from '../../shared/types';
 import { api } from './api';
 import { rt } from './rt';
-import { hueFor, initials } from './util';
+import { hueFor, initials, money } from './util';
 
 /** Same coloured-initials avatar the rest of ClaimIt uses, as an SVG data URL for Chat UI. */
 const avatar = (id: string, name: string) => {
@@ -16,7 +16,7 @@ const avatar = (id: string, name: string) => {
 let app: NCChatUIApplication | null = null;
 let root: HTMLElement | null = null;
 
-const rupees = (n: number) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
+const rupees = (n: number, currency = 'INR') => money(Number(n || 0), currency);
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
 function contentOf<T>(m: any): T {
@@ -63,7 +63,7 @@ class OrderBubble extends HTMLElement {
         <div style="display:flex;gap:10px;align-items:center;margin-top:6px">${img}
           <div style="min-width:0">
             <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(o.itemName)}</div>
-            <div style="font-size:13px;color:#3a312a">${rupees(o.price)} · UPI ${esc(o.upi)}</div>
+            <div style="font-size:13px;color:#3a312a">${rupees(o.price, o.currency)} · ${o.upi ? 'UPI ' + esc(o.upi) : 'payment link'}</div>
           </div>
         </div>
       </div>`;

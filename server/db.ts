@@ -107,6 +107,8 @@ addColumn('claims', 'pay_opened', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('claims', 'shipped_at', 'INTEGER');
 addColumn('claims', 'tracking', 'TEXT');
 addColumn('sellers', 'phone', 'TEXT');
+addColumn('sellers', 'currency', "TEXT NOT NULL DEFAULT 'INR'");
+addColumn('sellers', 'pay_link', 'TEXT');
 addColumn('drops', 'practice', 'INTEGER NOT NULL DEFAULT 0');
 db.exec(`
 CREATE TABLE IF NOT EXISTS follows (

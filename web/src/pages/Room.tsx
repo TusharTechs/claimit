@@ -7,7 +7,7 @@ import { rt, type RtMessage } from '../rt';
 import { Avatar, ConfirmSheet, ItemThumb, Logo, LogoMark, QR, Sheet, Spinner, celebrate, useToasts } from '../components/ui';
 import { DMThread } from '../components/DMThread';
 import { ensureBuyer, shopIdOf } from '../buyer';
-import { embedUrl, mmss, rupees, upiLink, useCountdown, useDebounced } from '../util';
+import { embedUrl, mmss, money, rupees, setCurrency, upiLink, useCountdown, useDebounced } from '../util';
 import {
   MSG, itemKey,
   type ChatContent, type DropCardContent, type DropState, type EventContent, type Item, type ItemState, type MyClaim, type PublicDrop,
@@ -26,7 +26,7 @@ const involves = (s: ItemState | undefined, id: string | undefined) =>
   !!s && !!id && (s.holder?.id === id || s.waitlist.some((w) => w.id === id));
 
 /** Hide phone numbers and UPI IDs in buyer chat: the #1 scam is "pay me directly at …". */
-const PAY_SCAM = /([\w.\-]{2,}@[a-z]{2,})|((?:\+?91[\s-]?)?[6-9]\d{4}[\s-]?\d{5})/gi;
+const PAY_SCAM = /([\w.\-]{2,}@[a-z][\w-]*(?:\.[\w-]+)*)|((?:paypal\.me|venmo\.com|cash\.app|wa\.me|gcash\.me)\/\S+)|(\$[A-Za-z][\w]{2,})|(\+?\d[\d\s().-]{7,}\d)/gi;
 const scrub = (t: string) => t.replace(PAY_SCAM, '•••');
 
 export default function Room() {
@@ -56,6 +56,7 @@ export default function Room() {
   const loadDrop = useCallback(async () => {
     try {
       const d = await api.drop(dropId);
+      setCurrency(d.currency);
       setDrop(d);
       if (typeof d.inRoom === 'number' && d.inRoom > 0) setViewers(d.inRoom);
       setState((cur) => {
@@ -733,9 +734,13 @@ function OrderCard({ c, buyerName, onChange, toast }: { c: MyClaim; buyerName: s
     return () => document.removeEventListener('visibilitychange', onVis);
   }, [payTapped]);
 
-  const phoneDigits = ship.phone.replace(/\D/g, '').slice(-10);
-  const shipOk = /^[6-9]\d{9}$/.test(phoneDigits) && ship.address.trim().length >= 10 && /^[1-9]\d{5}$/.test(ship.pincode);
-  const link = upiLink(c.upi, c.shop, c.price, `ClaimIt ${c.itemName}`);
+  const india = (c.currency ?? 'INR') === 'INR';
+  const phoneDigits = india ? ship.phone.replace(/\D/g, '').slice(-10) : ship.phone.replace(/[^\d+]/g, '');
+  const shipOk = (india ? /^[6-9]\d{9}$/.test(phoneDigits) : /^\+?\d{7,15}$/.test(phoneDigits))
+    && ship.address.trim().length >= 10 && (india ? /^[1-9]\d{5}$/.test(ship.pincode) : /^[A-Za-z0-9 -]{3,10}$/.test(ship.pincode.trim()));
+  // India: UPI deep link (any UPI app). Elsewhere: the seller's payment link (PayPal.me, Venmo, Stripe, GCash…).
+  const link = c.upi ? upiLink(c.upi, c.shop, c.price, `ClaimIt ${c.itemName}`) : c.payLink || '';
+  const price = money(c.price, c.currency);
   const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
   const act = async (fn: () => Promise<unknown>, ok: string) => {
     setBusy(true);
@@ -775,14 +780,14 @@ function OrderCard({ c, buyerName, onChange, toast }: { c: MyClaim; buyerName: s
             ) : (
               <div className="mt-2 space-y-2">
                 <label className="block text-sm font-semibold" htmlFor={`ph-${c.id}`}>Mobile number</label>
-                <input id={`ph-${c.id}`} className="input !py-2 text-sm" type="tel" inputMode="numeric" autoComplete="tel" placeholder="98765 43210" value={ship.phone}
+                <input id={`ph-${c.id}`} className="input !py-2 text-sm" type="tel" inputMode="tel" autoComplete="tel" placeholder={india ? '98765 43210' : '+1 415 555 0123'} value={ship.phone}
                   onChange={(e) => setShip({ ...ship, phone: e.target.value.replace(/[^\d+ ]/g, '').slice(0, 14) })} />
                 <label className="block text-sm font-semibold" htmlFor={`ad-${c.id}`}>Address</label>
-                <textarea id={`ad-${c.id}`} className="input !py-2 text-sm" rows={2} autoComplete="street-address" placeholder="Flat / street / area / city" value={ship.address}
+                <textarea id={`ad-${c.id}`} className="input !py-2 text-sm" rows={2} autoComplete="street-address" placeholder={india ? 'Flat / street / area / city' : 'Street, apt, city, state'} value={ship.address}
                   onChange={(e) => setShip({ ...ship, address: e.target.value.slice(0, 300) })} />
-                <label className="block text-sm font-semibold" htmlFor={`pin-${c.id}`}>PIN code</label>
-                <input id={`pin-${c.id}`} className="input !py-2 text-sm" inputMode="numeric" autoComplete="postal-code" placeholder="560034" value={ship.pincode}
-                  onChange={(e) => setShip({ ...ship, pincode: e.target.value.replace(/\D/g, '').slice(0, 6) })} />
+                <label className="block text-sm font-semibold" htmlFor={`pin-${c.id}`}>{india ? 'PIN code' : 'Postal / ZIP code'}</label>
+                <input id={`pin-${c.id}`} className="input !py-2 text-sm" inputMode={india ? 'numeric' : 'text'} autoComplete="postal-code" placeholder={india ? '560034' : '94103'} value={ship.pincode}
+                  onChange={(e) => setShip({ ...ship, pincode: india ? e.target.value.replace(/\D/g, '').slice(0, 6) : e.target.value.slice(0, 10) })} />
                 {shipOk && <button className="btn w-full bg-ink py-2 text-sm text-white" onClick={() => setEditing(false)}>Save address</button>}
               </div>
             )}
@@ -791,21 +796,25 @@ function OrderCard({ c, buyerName, onChange, toast }: { c: MyClaim; buyerName: s
           {/* ② Pay */}
           <section className={`rounded-xl p-3 ${shipOk ? 'bg-mint-soft/60' : 'bg-paper opacity-60'}`}>
             <div className="text-xs font-bold uppercase tracking-wider text-muted">Pay {c.shop}</div>
-            <a href={shipOk ? link : undefined} aria-disabled={!shipOk} onClick={() => { if (!shipOk) return; setPayTapped(true); api.payingApp(c.id).catch(() => {}); }}
-              className={`btn mt-2 w-full py-3 text-white ${shipOk ? 'bg-mint' : 'pointer-events-none bg-muted'}`}>Pay {rupees(c.price)} with any UPI app</a>
-            {!isMobile && shipOk && (
+            <a href={shipOk ? link : undefined} aria-disabled={!shipOk} target={c.upi ? undefined : '_blank'} rel="noreferrer"
+              onClick={() => { if (!shipOk) return; setPayTapped(true); api.payingApp(c.id).catch(() => {}); }}
+              className={`btn mt-2 w-full py-3 text-white ${shipOk ? 'bg-mint' : 'pointer-events-none bg-muted'}`}>
+              {c.upi ? `Pay ${price} with any UPI app` : `Pay ${price} via ${c.shop}'s payment link ↗`}
+            </a>
+            {!isMobile && shipOk && c.upi && (
               <div className="mt-2 flex items-center gap-3 rounded-xl bg-white p-2">
                 <QR value={link} size={88} />
                 <p className="text-sm text-ink-2">On a laptop? Scan with your phone's UPI app to pay <b>{c.upi}</b></p>
               </div>
             )}
+            {!c.upi && shipOk && <p className="mt-1.5 text-xs text-muted">Pay exactly {price}. Add “{c.itemName}” as the note.</p>}
           </section>
 
           {/* ③ Confirm */}
           <section className="rounded-xl bg-paper p-3">
             <div className="text-xs font-bold uppercase tracking-wider text-muted">Then tell {c.shop} you've paid</div>
-            <label className="mt-2 block text-sm font-semibold" htmlFor={`txn-${c.id}`}>UPI transaction ID <span className="font-normal text-muted">(optional, speeds up confirmation)</span></label>
-            <input id={`txn-${c.id}`} className="input mt-1 !py-2 text-sm" placeholder="12-digit ref from your UPI app" value={txn} onChange={(e) => setTxn(e.target.value)} maxLength={40} />
+            <label className="mt-2 block text-sm font-semibold" htmlFor={`txn-${c.id}`}>{c.upi ? 'UPI transaction ID' : 'Payment reference'} <span className="font-normal text-muted">(optional, speeds up confirmation)</span></label>
+            <input id={`txn-${c.id}`} className="input mt-1 !py-2 text-sm" placeholder={c.upi ? '12-digit ref from your UPI app' : 'Transaction ID or the name you paid from'} value={txn} onChange={(e) => setTxn(e.target.value)} maxLength={40} />
             <button ref={paidRef} className={`btn mt-2 w-full py-3 text-white ${payTapped ? 'anim-ring bg-ink' : 'bg-ink'}`} disabled={busy || !shipOk}
               onClick={() => act(() => api.markPaid(c.id, { utr: txn, ...ship, phone: phoneDigits }), 'Sent — the seller will confirm shortly')}>
               {busy ? <Spinner /> : "I've paid"}

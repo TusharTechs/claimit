@@ -13,10 +13,10 @@ export const DEMO_DROP = 'demo';
 const SELLER = 'demoshop';
 const BOTS = [
   { id: 'bot_aarav', name: 'Aarav (bot)' },
-  { id: 'bot_diya', name: 'Diya (bot)' },
-  { id: 'bot_kabir', name: 'Kabir (bot)' },
+  { id: 'bot_diya', name: 'Sofia (bot)' },
+  { id: 'bot_kabir', name: 'Kenji (bot)' },
 ];
-const CHATTER = ['Is it true to size?', 'Ooh that colour 😍', 'Ships to Pune?', 'Next one please!', 'So fast 😅'];
+const CHATTER = ['Is it true to size?', 'Ooh that colour 😍', 'Do you ship internationally?', 'Next one please!', 'So fast 😅'];
 export const isBot = (buyerId: string) => buyerId.startsWith('bot_');
 
 let phaseAt = 0;
@@ -29,13 +29,18 @@ async function ensureDemo() {
     db.prepare('INSERT INTO sellers (id, name, shop, upi, key, created) VALUES (?, ?, ?, ?, ?, ?)')
       .run(SELLER, 'Demo', 'ClaimIt Demo Shop', 'demo@claimit', 'demo-no-login-' + Math.random().toString(36).slice(2), now());
   }
+  // Global demo: USD, international bot names (kept in sync on every boot).
+  db.prepare(`UPDATE sellers SET currency = 'USD' WHERE id = ?`).run(SELLER);
+  for (const b of BOTS) db.prepare('UPDATE buyers SET name = ? WHERE id = ?').run(b.name, b.id);
+  [['demoit0', 'Canvas tote', 18], ['demoit1', 'Floral summer dress · S', 29], ['demoit2', 'Vintage denim jacket · M', 42]]
+    .forEach(([id, name, price]) => db.prepare('UPDATE items SET name = ?, price = ? WHERE id = ?').run(name, price, id));
   for (const b of BOTS) db.prepare('INSERT OR IGNORE INTO buyers (id, name, key, created, is_guest) VALUES (?, ?, ?, ?, 0)').run(b.id, b.name, 'bot', now());
   if (!q.drop(DEMO_DROP)) {
     await nexconn.createOpenChannel(`drop_${DEMO_DROP}`).catch(() => {});
     db.prepare('INSERT INTO drops (id, seller_id, title, channel_id, status, created, hold_seconds, practice) VALUES (?, ?, ?, ?, ?, ?, ?, 1)')
       .run(DEMO_DROP, SELLER, 'Live demo — try to beat the bots', `drop_${DEMO_DROP}`, 'live', now(), 25);
     const dir = path.resolve(fs.existsSync('dist/web/demo') ? 'dist/web/demo' : 'web/public/demo');
-    const items: [string, number, string][] = [['Canvas tote', 299, 'canvas-tote.jpg'], ['Floral kurti · S', 549, 'floral-kurti.jpg'], ['Vintage denim jacket · M', 899, 'denim-jacket.jpg']];
+    const items: [string, number, string][] = [['Canvas tote', 18, 'canvas-tote.jpg'], ['Floral summer dress · S', 29, 'floral-kurti.jpg'], ['Vintage denim jacket · M', 42, 'denim-jacket.jpg']];
     items.forEach(([name, price, file], i) => {
       const img = `demo${i}`;
       try { db.prepare('INSERT OR IGNORE INTO images (id, mime, data) VALUES (?, ?, ?)').run(img, 'image/jpeg', fs.readFileSync(path.join(dir, file))); } catch { /* no image */ }
@@ -80,7 +85,7 @@ function tick() {
   const holder = q.activeClaims(current).find((c) => c.status === 'holding' || c.status === 'paying');
   // The second bot pays ~6s after being promoted.
   if (holder?.status === 'holding' && holder.buyer_id === BOTS[1].id && holder.hold_until && holder.hold_until - now() < (25 - 6) * 1000) {
-    buyerMarkPaid(holder.id, holder.buyer_id, '', { phone: '9000000000', address: 'Demo address, Bengaluru', pincode: '560001' });
+    buyerMarkPaid(holder.id, holder.buyer_id, '', { phone: '+10000000000', address: 'Demo address, Demo City', pincode: '00000' });
   }
   // The demo shop confirms any payment (bot or a real visitor's) after 3s.
   if (holder?.status === 'paying' && !confirming.has(holder.id)) {

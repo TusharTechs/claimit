@@ -13,7 +13,7 @@ export default function SellerLogin() {
     history.replaceState(null, '', '/sell/login'); // drop the secret from the address bar / history
     if (!id || !key) { setError('This login link is incomplete.'); return; }
     api.sellerLogin(id, key)
-      .then((s) => { sessions.setSeller({ id, key, name: s.name, shop: s.shop, upi: s.upi }); nav('/sell', { replace: true }); })
+      .then((s) => { sessions.setSeller({ id, key, name: s.name, shop: s.shop, upi: s.upi, currency: s.currency, payLink: s.payLink }); nav('/sell', { replace: true }); })
       .catch((e) => setError(e instanceof Error ? e.message : 'That login link is not valid.'));
   }, [nav]);
 

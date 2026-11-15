@@ -79,6 +79,8 @@ export interface OrderContent {
   upi: string;
   shop: string;
   holdUntil: number;
+  currency?: string;
+  payLink?: string | null;
 }
 
 export interface OrderUpdateContent {
@@ -103,6 +105,7 @@ export interface PublicDrop {
   inRoom?: number | null;
   /** The always-on demo room (other buyers are bots). */
   demo?: boolean;
+  currency?: string;
 }
 
 export interface MyClaim {
@@ -116,6 +119,8 @@ export interface MyClaim {
   holdUntil: number | null;
   upi: string;
   shop: string;
+  currency?: string;
+  payLink?: string | null;
   shippedAt?: number | null;
   tracking?: string | null;
 }
@@ -127,6 +132,10 @@ export interface AppConfig {
 }
 
 export const itemKey = (itemId: string) => `i_${itemId}`;
+
+/** Currencies sellers can choose. India (UPI) is the launch market; everywhere else uses a payment link. */
+export const CURRENCIES = ['INR', 'USD', 'PHP', 'IDR', 'SGD', 'MYR', 'THB', 'AED', 'GBP', 'EUR'] as const;
+export type Currency = (typeof CURRENCIES)[number];
 
 /** Live status chip for the order card (driven by Nexconn message metadata key `s`). */
 export const ORDER_STATUS: Record<string, { label: string; tone: 'sun' | 'mint' | 'muted' | 'hot' }> = {

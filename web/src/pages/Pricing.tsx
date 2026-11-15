@@ -7,13 +7,13 @@ import { Logo, Spinner, celebrate, useToasts } from '../components/ui';
 const FREE = [
   'Unlimited drops and items',
   'Live claim queue + automatic waitlist',
-  'Buyers pay your UPI directly — 0% fees',
+  'Buyers pay you directly (PayPal, Stripe, UPI, any link) — 0% fees',
   'Order chat, delivery details, CSV export',
   'Shop page with followers',
 ];
 const PRO = [
   'Everything in Free',
-  'Auto-confirm payments (UPI gateway, no manual checks)',
+  'Auto-confirm payments via Stripe, PayPal & UPI gateways — no manual checks',
   'Co-hosts: a helper confirms payments while you’re live',
   'Advanced analytics: conversion, repeat buyers, best drop times',
   'Custom shop link and your logo on the drop page',
@@ -33,12 +33,12 @@ export default function Pricing() {
       </header>
       <main className="mx-auto max-w-5xl px-4 pb-16 sm:px-6">
         <h1 className="mt-6 text-center font-display text-5xl font-extrabold leading-none">Free while you grow.</h1>
-        <p className="mx-auto mt-3 max-w-xl text-center text-lg text-ink-2">ClaimIt never touches your money: buyers pay your UPI directly. Pro is for sellers doing several drops a week.</p>
+        <p className="mx-auto mt-3 max-w-xl text-center text-lg text-ink-2">ClaimIt never touches your money: buyers pay you directly. Pro is for sellers doing several drops a week.</p>
 
         <div className="mt-10 grid gap-5 md:grid-cols-2">
           <div className="rounded-[28px] border border-line bg-card p-7 shadow-[var(--shadow-card)]">
             <div className="font-display text-2xl font-bold">Free</div>
-            <div className="mt-2 font-display text-5xl font-extrabold">₹0</div>
+            <div className="mt-2 font-display text-5xl font-extrabold">$0</div>
             <div className="text-sm text-muted">forever, 0% commission</div>
             <ul className="mt-6 space-y-2.5">{FREE.map((f) => <li key={f} className="flex gap-2"><Check className="mt-0.5 size-5 shrink-0 text-mint" />{f}</li>)}</ul>
             <Link to="/sell" className="btn mt-7 w-full bg-ink py-3.5 text-white">Start a drop</Link>
@@ -46,7 +46,8 @@ export default function Pricing() {
           <div className="relative rounded-[28px] bg-ink p-7 text-white shadow-[var(--shadow-pop)]">
             <div className="absolute -top-3 right-6 flex items-center gap-1 rounded-full bg-sun px-3 py-1 text-xs font-bold text-ink"><Sparkles className="size-3.5" /> Founding 100 sellers: free for life</div>
             <div className="font-display text-2xl font-bold">Pro</div>
-            <div className="mt-2 font-display text-5xl font-extrabold">₹499<span className="text-xl font-bold text-white/70">/month</span></div>
+            <div className="mt-2 font-display text-5xl font-extrabold">$9<span className="text-xl font-bold text-white/70">/month</span></div>
+            <div className="text-sm text-white/70">Local pricing in every market</div>
             <div className="text-sm text-white/70">or 1.5% of sales, whichever is lower</div>
             <ul className="mt-6 space-y-2.5">{PRO.map((f) => <li key={f} className="flex gap-2"><Check className="mt-0.5 size-5 shrink-0 text-sun" />{f}</li>)}</ul>
             {done ? (

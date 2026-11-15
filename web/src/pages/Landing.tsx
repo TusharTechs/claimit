@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import {
-  BadgeIndianRupee, BellRing, Check, ChevronDown, Clock, MessageCircle, MousePointerClick, Radio, ShieldCheck, Smartphone, Truck, Users, X, Zap,
+  Banknote, BellRing, Check, ChevronDown, Clock, MessageCircle, MousePointerClick, Radio, ShieldCheck, Smartphone, Truck, Users, X, Zap,
 } from 'lucide-react';
 import { api, type Impact } from '../api';
 import { Avatar, Logo, LogoMark } from '../components/ui';
 import { Counter } from './Impact';
-import { rupees } from '../util';
+import { money } from '../util';
 
 // ---------- animated claim race (the whole product in 8 seconds) ----------
 
@@ -37,26 +37,26 @@ function useRace() {
 
 function PhoneDemo() {
   const phase = useRace();
-  const holder = phase === 'promoted' || phase === 'sold' ? { id: 'b_rahul', name: 'Rahul' } : { id: 'b_priya', name: 'Priya' };
-  const queue = phase === 'promoted' || phase === 'sold' ? [{ id: 'b_meera', name: 'Meera' }] : [{ id: 'b_rahul', name: 'Rahul' }, { id: 'b_meera', name: 'Meera' }];
+  const holder = phase === 'promoted' || phase === 'sold' ? { id: 'b_leo', name: 'Leo' } : { id: 'b_priya', name: 'Priya' };
+  const queue = phase === 'promoted' || phase === 'sold' ? [{ id: 'b_sofia', name: 'Sofia' }] : [{ id: 'b_leo', name: 'Leo' }, { id: 'b_sofia', name: 'Sofia' }];
   const feed = {
-    drop: ['🔥 Dropped #12: Floral kurti · ₹549'],
-    taps: ['🔥 Dropped #12: Floral kurti · ₹549', 'Priya claimed Floral kurti'],
-    held: ['Priya claimed Floral kurti', 'Rahul is #1 in line', 'Meera is #2 in line'],
-    promoted: ['Meera is #2 in line', "⏱ Priya ran out of time → Rahul's turn"],
-    sold: ["⏱ Priya ran out of time → Rahul's turn", 'SOLD to Rahul — Floral kurti'],
+    drop: ['🔥 Dropped #12: Denim jacket · $42'],
+    taps: ['🔥 Dropped #12: Denim jacket · $42', 'Priya claimed Denim jacket'],
+    held: ['Priya claimed Denim jacket', 'Leo is #1 in line', 'Sofia is #2 in line'],
+    promoted: ['Sofia is #2 in line', "⏱ Priya ran out of time → Leo's turn"],
+    sold: ["⏱ Priya ran out of time → Leo's turn", 'SOLD to Leo — Denim jacket'],
   }[phase];
   return (
     <div className="relative mx-auto w-[300px]" aria-label="Animated example of a ClaimIt drop" role="img">
       <div className="rounded-[44px] border-[10px] border-ink bg-paper p-3 shadow-[0_40px_80px_-30px_rgb(23_18_14/0.5)]">
         <div className="mx-auto mb-2 h-5 w-24 rounded-full bg-ink" />
         <div className="flex items-center justify-between px-1 text-[13px]">
-          <span className="font-display font-extrabold">Asha's Thrift Closet</span>
+          <span className="font-display font-extrabold">Maya's Vintage</span>
           <span className="flex items-center gap-1 rounded-full bg-ink px-2 py-0.5 text-[10px] font-bold text-white"><span className="anim-live size-1.5 rounded-full bg-hot" />LIVE · 214</span>
         </div>
         <div className="relative mt-2 overflow-hidden rounded-2xl bg-card shadow-[var(--shadow-card)]">
           <div className="relative aspect-[4/3]">
-            <img src="/demo/floral-kurti.jpg" alt="" className="size-full object-cover" />
+            <img src="/demo/denim-jacket.jpg" alt="" className="size-full object-cover" />
             <span className="absolute left-2 top-2 rounded-full bg-ink/85 px-2 py-0.5 text-[10px] font-bold text-white">#12 · JUST DROPPED</span>
             <AnimatePresence>
               {phase === 'sold' && (
@@ -68,7 +68,7 @@ function PhoneDemo() {
             </AnimatePresence>
           </div>
           <div className="p-3">
-            <div className="flex justify-between font-display text-base font-bold"><span>Floral kurti · S</span><span>₹549</span></div>
+            <div className="flex justify-between font-display text-base font-bold"><span>Vintage denim jacket · M</span><span>$42</span></div>
             <AnimatePresence>
               {phase !== 'drop' && phase !== 'taps' && phase !== 'sold' && (
                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="mt-2 overflow-hidden rounded-xl bg-sun-soft p-2 text-[12px]">
@@ -98,7 +98,7 @@ function PhoneDemo() {
           </AnimatePresence>
         </div>
         <motion.div layout className={`mt-1 rounded-full py-3 text-center font-display text-lg font-bold text-white ${phase === 'drop' ? 'anim-ring bg-hot' : phase === 'sold' ? 'bg-line !text-ink-2' : 'bg-ink'}`}>
-          {phase === 'drop' ? 'CLAIM · ₹549' : phase === 'sold' ? 'Sold to Rahul' : `Join the line (#${queue.length + 1})`}
+          {phase === 'drop' ? 'CLAIM · $42' : phase === 'sold' ? 'Sold to Leo' : `Join the line (#${queue.length + 1})`}
         </motion.div>
       </div>
       <AnimatePresence>
@@ -119,13 +119,14 @@ const COMPARE: [string, string, string][] = [
   ['Who gets the item?', 'Whoever the seller spots first in a scrolling comment flood', 'First tap, decided by the server, visible to everyone'],
   ['Double-claims & fights', 'Weekly', 'Impossible: exactly one holder per item'],
   ['Buyer ghosts after claiming', 'Seller DMs, waits, re-posts', 'Timer runs out → next in line, automatically'],
-  ['Getting paid', 'Chasing screenshots in DMs', 'Order card with UPI link, delivery address, “I’ve paid” button'],
+  ['Getting paid', 'Chasing screenshots in DMs', 'Order card with your payment link, delivery address, “I’ve paid” button'],
   ['Knowing who to ship to', 'Scroll back through chats', 'One-click orders CSV with addresses'],
 ];
 
 const FAQ: [string, string][] = [
   ['Do buyers need to install an app or sign up?', 'No. They tap your link and they’re in. A name is asked only when they claim something.'],
-  ['Does ClaimIt take a cut of my sales?', 'No. Buyers pay your UPI ID directly. The free plan is free forever; Pro is optional.'],
+  ['Does ClaimIt take a cut of my sales?', 'No. Buyers pay you directly — PayPal, Venmo, Stripe, GCash, UPI or any payment link. The free plan is free forever; Pro is optional.'],
+  ['Which countries and currencies work?', 'All of them. Pick your currency when you set up — dollars, euros, pounds, pesos, rupiah, rupees and more. The same “comment SOLD / MINE” chaos happens on every live-selling platform, and live rooms run on Nexconn’s global network.'],
   ['I go live on Instagram. How does this fit?', 'Keep going live on Instagram as usual. Put your ClaimIt link in your story, bio or pinned comment, and say “#12 is up!” — buyers claim in ClaimIt instead of commenting.'],
   ['What if the winner doesn’t pay?', 'You choose 2–15 minutes. When it runs out, the next person in line is promoted automatically and gets the order card.'],
   ['How many people can join a drop?', 'As many as you can bring. Live rooms run on Nexconn open channels built for huge live-stream audiences; product drops are priority messages that land even when chat is flooding.'],
@@ -158,7 +159,7 @@ export default function Landing() {
               </Link>
             ) : (
               <p className="mb-5 inline-flex items-center gap-2 rounded-full bg-hot-soft px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-hot-dark">
-                <Radio className="size-3.5" /> For Instagram & WhatsApp live sellers
+                <Radio className="size-3.5" /> For Instagram, TikTok, Facebook & WhatsApp live sellers
               </p>
             )}
             <h1 className="font-display text-[46px] font-extrabold leading-[0.95] tracking-tight sm:text-7xl">
@@ -169,14 +170,14 @@ export default function Landing() {
           <div className="md:col-start-1 md:row-start-2">
             <p className="max-w-md text-lg text-ink-2">
               Share one link during your live. Buyers tap <b>Claim</b>, everyone watches the same queue, and the winner lands straight in a
-              checkout chat with your UPI. If they don’t pay in time, the next person gets it — automatically.
+              checkout chat with your payment link. If they don’t pay in time, the next person gets it — automatically.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link to="/sell" className="btn anim-ring bg-hot px-7 py-4 text-lg text-white shadow-[var(--shadow-pop)]">Start a drop — free</Link>
               <Link to="/d/demo" className="btn border-2 border-ink px-6 py-3.5 text-lg">Try the live demo</Link>
             </div>
             <ul className="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm font-semibold text-ink-2">
-              {['No app for buyers', '0% commission', 'Pay by any UPI app'].map((t) => <li key={t} className="flex items-center gap-1.5"><Check className="size-4 text-mint" />{t}</li>)}
+              {['No app for buyers', '0% commission', 'Any currency, any payment link'].map((t) => <li key={t} className="flex items-center gap-1.5"><Check className="size-4 text-mint" />{t}</li>)}
             </ul>
           </div>
         </section>
@@ -184,7 +185,7 @@ export default function Landing() {
         {showImpact && (
           <section className="border-y border-line bg-card">
             <div className="mx-auto grid max-w-6xl grid-cols-2 gap-6 px-4 py-8 text-center sm:grid-cols-4 sm:px-6">
-              {([['Buyers in drops', impact.buyers], ['Items sold fairly', impact.itemsSold], ['Races settled, 0 double-claims', impact.contestedItems], ['Paid to sellers', impact.gmvInr, rupees]] as [string, number, ((n: number) => string)?][]).map(([k, v, f]) => (
+              {([['Buyers in drops', impact.buyers], ['Items sold fairly', impact.itemsSold], ['Races settled, 0 double-claims', impact.contestedItems], ['Paid to sellers (≈ USD)', impact.gmvUsd, (n: number) => money(n, 'USD')]] as [string, number, ((n: number) => string)?][]).map(([k, v, f]) => (
                 <div key={k}><div className="font-display text-4xl font-extrabold"><Counter value={v} format={f} /></div><div className="mt-1 text-sm text-muted">{k}</div></div>
               ))}
             </div>
@@ -195,12 +196,12 @@ export default function Landing() {
         {/* How it works with Instagram */}
         <section id="how" className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
           <h2 className="font-display text-4xl font-extrabold sm:text-5xl">Keep your live. Lose the chaos.</h2>
-          <p className="mt-3 max-w-2xl text-lg text-ink-2">ClaimIt sits next to the live you already do on Instagram, YouTube or a WhatsApp group.</p>
+          <p className="mt-3 max-w-2xl text-lg text-ink-2">ClaimIt sits next to the live you already do — Instagram, TikTok, Facebook, YouTube or a WhatsApp group — anywhere in the world.</p>
           <div className="mt-8 grid gap-4 md:grid-cols-3">
             {[
-              [Smartphone, 'Go live like always', 'Instagram, YouTube or your WhatsApp community. Add your ClaimIt link to your story, bio or pinned comment.'],
+              [Smartphone, 'Go live like always', 'Instagram, TikTok, Facebook, YouTube or your WhatsApp community. Add your ClaimIt link to your story, bio or pinned comment.'],
               [Zap, 'Tap “Drop now”', 'Show #12 on camera and drop it. Every viewer’s phone shows the item with one big Claim button, at the same instant.'],
-              [BadgeIndianRupee, 'Get paid, ship it', 'The winner gets an order card with your UPI link and a timer. Confirm in one tap, download addresses, ship.'],
+              [Banknote, 'Get paid, ship it', 'The winner gets an order card with your payment link and a timer. Confirm in one tap, download addresses, ship.'],
             ].map(([Icon, t, d], i) => {
               const I = Icon as typeof Zap;
               return (
@@ -241,7 +242,7 @@ export default function Landing() {
               [Clock, 'Auto-promotion', 'Unpaid holds pass to the next in line at the time limit you set — no more re-posting.'],
               [Truck, 'Delivery details built in', 'Phone, address and PIN come with every payment. Export all orders as CSV.'],
               [MessageCircle, 'One inbox for every order', 'Chat with each buyer in one place, with order cards in the thread.'],
-              [ShieldCheck, 'Scam shield', 'Phone numbers and UPI IDs are hidden in room chat, and only the real seller gets the Seller badge.'],
+              [ShieldCheck, 'Scam shield', 'Phone numbers, emails and payment handles are hidden in room chat, and only the real seller gets the Seller badge.'],
               [BellRing, 'Followers for next time', 'Buyers follow your shop and get pinged when your next drop opens.'],
             ].map(([Icon, t, d]) => {
               const I = Icon as typeof Zap;
@@ -282,7 +283,7 @@ export default function Landing() {
           <div className="flex flex-col items-start justify-between gap-6 rounded-[32px] bg-hot p-8 text-white sm:flex-row sm:items-center sm:p-12">
             <div>
               <h2 className="font-display text-4xl font-extrabold leading-tight">Your next drop, minus the chaos.</h2>
-              <p className="mt-2 text-white/85">Set up in 20 seconds. Free forever for your first drops — and no cut of your sales.</p>
+              <p className="mt-2 text-white/85">Set up in 20 seconds, in any currency. Free forever — and no cut of your sales.</p>
             </div>
             <Link to="/sell" className="btn shrink-0 bg-white px-7 py-4 text-lg text-ink">Start a drop</Link>
           </div>
@@ -291,7 +292,7 @@ export default function Landing() {
 
       <footer className="border-t border-line py-8">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 text-sm text-muted sm:flex-row sm:px-6">
-          <span className="flex items-center gap-2"><LogoMark className="size-5" /> ClaimIt · fair live drops for India’s social sellers</span>
+          <span className="flex items-center gap-2"><LogoMark className="size-5" /> ClaimIt · fair live drops for social sellers everywhere</span>
           <nav className="flex gap-4"><Link to="/pricing">Pricing</Link><Link to="/impact">Impact</Link><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link></nav>
           <span>Real-time by Nexconn</span>
         </div>

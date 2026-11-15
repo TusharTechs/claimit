@@ -7,7 +7,7 @@ import { nexconn } from './nexconn.ts';
 import { mockbus } from './mockbus.ts';
 import { presence } from './presence.ts';
 import crypto from 'node:crypto';
-import { MSG } from '../shared/types.ts';
+import { CURRENCIES, MSG } from '../shared/types.ts';
 import {
   AppError, buyerMarkPaid, markShipped, claim, closeItem, dropItem, endDrop, logEvent, myClaims, publicDrop,
   q, release, sellerConfirm, sellerUserId, startExpiryLoop, toItem,
@@ -58,7 +58,7 @@ function seller(req: Request) {
   const id = req.header('x-seller-id') || '';
   const key = req.header('x-seller-key') || '';
   const row = db.prepare('SELECT * FROM sellers WHERE id = ? AND key = ?').get(id, key) as
-    { id: string; name: string; shop: string; upi: string } | undefined;
+    { id: string; name: string; shop: string; upi: string; currency: string; pay_link: string | null } | undefined;
   if (!row) throw new AppError(401, 'NO_AUTH', 'Seller session not found');
   return row;
 }
@@ -104,22 +104,30 @@ function saveImage(dataUrl: unknown): string | null {
 app.post('/api/sellers', limit('seller', 10, 60 * 60_000), h(async (req) => {
   const name = str(req.body.name, 60, 'Your name');
   const shop = str(req.body.shop, 60, 'Shop name');
-  const upi = str(req.body.upi, 80, 'UPI ID');
-  const phone = str(req.body.phone, 20, 'WhatsApp number', false).replace(/[\s-]/g, '').replace(/^\+?91/, '');
-  if (phone && !/^[6-9]\d{9}$/.test(phone)) throw new AppError(400, 'BAD_PHONE', 'Enter a 10-digit WhatsApp number');
-  if (!/^[\w.\-]{2,}@[a-zA-Z]{2,}$/.test(upi)) throw new AppError(400, 'BAD_UPI', 'That UPI ID looks off (e.g. yourname@okicici)');
+  // "How buyers pay you": a UPI ID (India) or any https payment link (PayPal.me, Venmo, Stripe, GCash…).
+  const currency = (CURRENCIES as readonly string[]).includes(String(req.body.currency)) ? String(req.body.currency) : 'INR';
+  const payInput = str(req.body.upi ?? req.body.pay, 300, 'How buyers pay you');
+  const isLink = /^https:\/\/\S+\.\S+/i.test(payInput);
+  const upi = isLink ? '' : payInput;
+  const payLink = isLink ? payInput : null;
+  const rawPhone = str(req.body.phone, 20, 'WhatsApp number', false).replace(/[\s-()]/g, '');
+  const phone = currency === 'INR' ? rawPhone.replace(/^\+?91/, '') : rawPhone.replace(/^\+/, '');
+  if (phone && (currency === 'INR' ? !/^[6-9]\d{9}$/.test(phone) : !/^\d{7,15}$/.test(phone))) {
+    throw new AppError(400, 'BAD_PHONE', currency === 'INR' ? 'Enter a 10-digit WhatsApp number' : 'Enter your WhatsApp number with country code');
+  }
+  if (!isLink && !/^[\w.\-]{2,}@[a-zA-Z]{2,}$/.test(upi)) throw new AppError(400, 'BAD_PAY', 'Enter a UPI ID (yourname@okicici) or a payment link starting with https://');
   const id = rid(10);
   const key = rid(24);
-  db.prepare('INSERT INTO sellers (id, name, shop, upi, key, created, phone) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, name, shop, upi, key, now(), phone || null);
+  db.prepare('INSERT INTO sellers (id, name, shop, upi, key, created, phone, currency, pay_link) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, name, shop, upi, key, now(), phone || null, currency, payLink);
   const userId = sellerUserId(id);
   const token = await nexconn.token(userId, shop);
-  return { id, key, name, shop, upi, phone: phone || null, userId, token };
+  return { id, key, name, shop, upi, payLink, currency, phone: phone || null, userId, token };
 }));
 
 app.post('/api/seller/session', h(async (req) => {
   const s = seller(req);
   const userId = sellerUserId(s.id);
-  return { ...s, userId, token: await nexconn.token(userId, s.shop) };
+  return { ...s, payLink: s.pay_link, userId, token: await nexconn.token(userId, s.shop) };
 }));
 
 /** Names for Nexconn Chat UI (its reqUserProfiles hook): buyers who ordered from this seller, plus the seller. */
@@ -223,8 +231,8 @@ app.get('/api/seller/drops/:dropId/orders.csv', (req, res, next) => {
 app.post('/api/seller/drops/:dropId/items', h((req) => {
   const { d } = ownDrop(req);
   const name = str(req.body.name, 80, 'Item name');
-  const price = Math.round(Number(req.body.price));
-  if (!Number.isFinite(price) || price <= 0 || price > 1_000_000) throw new AppError(400, 'BAD_PRICE', 'Enter a price in ₹');
+  const price = Math.round(Number(req.body.price) * 100) / 100;
+  if (!Number.isFinite(price) || price <= 0 || price > 10_000_000) throw new AppError(400, 'BAD_PRICE', 'Enter a price');
   const imageId = saveImage(req.body.image);
   const idx = (db.prepare('SELECT COALESCE(MAX(idx), 0) + 1 AS n FROM items WHERE drop_id = ?').get(d.id) as { n: number }).n;
   const id = rid(8);
@@ -257,7 +265,8 @@ app.post('/api/seller/practice', h(async (req) => {
   db.prepare('INSERT INTO drops (id, seller_id, title, channel_id, status, created, hold_seconds, practice) VALUES (?, ?, ?, ?, ?, ?, ?, 1)')
     .run(id, s.id, 'Practice drop (only you can see this)', channelId, 'live', now(), 120);
   const demo = path.resolve(fs.existsSync('dist/web/demo') ? 'dist/web/demo' : 'web/public/demo');
-  const samples: [string, number, string][] = [['Canvas tote (practice)', 299, 'canvas-tote.jpg'], ['Floral kurti (practice)', 549, 'floral-kurti.jpg'], ['Denim jacket (practice)', 899, 'denim-jacket.jpg']];
+  const prices = s.currency === 'INR' ? [299, 549, 899] : s.currency === 'IDR' ? [150000, 250000, 450000] : s.currency === 'PHP' ? [450, 799, 1499] : [18, 29, 42];
+  const samples: [string, number, string][] = [['Canvas tote (practice)', prices[0], 'canvas-tote.jpg'], ['Floral dress (practice)', prices[1], 'floral-kurti.jpg'], ['Denim jacket (practice)', prices[2], 'denim-jacket.jpg']];
   samples.forEach(([name, price, file], i) => {
     let imageId: string | null = null;
     try { imageId = rid(16); db.prepare('INSERT INTO images (id, mime, data) VALUES (?, ?, ?)').run(imageId, 'image/jpeg', fs.readFileSync(path.join(demo, file))); } catch { imageId = null; }
@@ -353,6 +362,7 @@ app.post('/api/shops/:sellerId/follow', h((req) => {
 
 /** Public, aggregate-only numbers (no personal data) — shown on /impact and the landing page. */
 let impactCache: { at: number; data: unknown } | null = null;
+const USD_RATE: Record<string, number> = { USD: 1, INR: 0.012, PHP: 0.017, IDR: 0.000062, SGD: 0.74, MYR: 0.21, THB: 0.028, AED: 0.27, GBP: 1.27, EUR: 1.08 };
 app.get('/api/impact', h(() => {
   if (impactCache && Date.now() - impactCache.at < 30_000) return impactCache.data;
   const one = (sql: string) => Number(Object.values(db.prepare(sql).get() as object)[0] ?? 0);
@@ -363,7 +373,10 @@ app.get('/api/impact', h(() => {
     claimsSettled: one(`SELECT COUNT(*) FROM claims c JOIN drops d ON d.id = c.drop_id WHERE d.practice = 0 AND c.status IN ('paid','expired','cancelled','rejected')`),
     contestedItems: one(`SELECT COUNT(*) FROM (SELECT c.item_id FROM claims c JOIN drops d ON d.id = c.drop_id WHERE d.practice = 0 GROUP BY c.item_id HAVING COUNT(*) > 1)`),
     itemsSold: one(`SELECT COUNT(*) FROM items i JOIN drops d ON d.id = i.drop_id WHERE d.practice = 0 AND i.status = 'sold'`),
-    gmvInr: one(`SELECT COALESCE(SUM(i.price),0) FROM claims c JOIN items i ON i.id = c.item_id JOIN drops d ON d.id = c.drop_id WHERE d.practice = 0 AND c.status = 'paid'`),
+    // Shops sell in many currencies: report an approximate USD total (static reference rates).
+    gmvUsd: Math.round((db.prepare(`SELECT s.currency AS cur, COALESCE(SUM(i.price),0) AS total FROM claims c JOIN items i ON i.id = c.item_id
+      JOIN drops d ON d.id = c.drop_id JOIN sellers s ON s.id = d.seller_id WHERE d.practice = 0 AND c.status = 'paid' GROUP BY s.currency`).all() as { cur: string; total: number }[])
+      .reduce((a, r) => a + r.total * (USD_RATE[r.cur] ?? 0), 0)),
     liveNow: (db.prepare(`SELECT d.id, d.title, s.shop FROM drops d JOIN sellers s ON s.id = d.seller_id
       WHERE d.status = 'live' AND d.practice = 0 AND EXISTS (SELECT 1 FROM items i WHERE i.drop_id = d.id AND i.status != 'draft') ORDER BY d.created DESC LIMIT 5`).all()),
   };
@@ -414,12 +427,15 @@ app.post('/api/drops/:dropId/items/:itemId/claim', limit('claim', 30, 60_000), h
 }));
 
 app.post('/api/claims/:claimId/paid', h((req) => {
-  const phone = str(req.body.phone, 20, 'Phone number').replace(/[\s-]/g, '').replace(/^\+?91/, '');
-  if (!/^[6-9]\d{9}$/.test(phone)) throw new AppError(400, 'BAD_PHONE', 'Enter a 10-digit mobile number');
+  const cl = q.claim(String(req.params.claimId));
+  const india = (cl ? q.seller(q.drop(cl.drop_id)!.seller_id)?.currency : 'INR') === 'INR';
+  const rawPhone = str(req.body.phone, 20, 'Phone number').replace(/[\s-()]/g, '');
+  const phone = india ? rawPhone.replace(/^\+?91/, '') : rawPhone;
+  if (india ? !/^[6-9]\d{9}$/.test(phone) : !/^\+?\d{7,15}$/.test(phone)) throw new AppError(400, 'BAD_PHONE', india ? 'Enter a 10-digit mobile number' : 'Enter a phone number with country code');
   const address = str(req.body.address, 300, 'Delivery address');
   if (address.length < 10) throw new AppError(400, 'BAD_ADDRESS', 'Please enter your full delivery address');
-  const pincode = str(req.body.pincode, 6, 'PIN code');
-  if (!/^[1-9]\d{5}$/.test(pincode)) throw new AppError(400, 'BAD_PIN', 'Enter a 6-digit PIN code');
+  const pincode = str(req.body.pincode, 10, india ? 'PIN code' : 'Postal code');
+  if (india ? !/^[1-9]\d{5}$/.test(pincode) : !/^[A-Za-z0-9 -]{3,10}$/.test(pincode)) throw new AppError(400, 'BAD_PIN', india ? 'Enter a 6-digit PIN code' : 'Enter a valid postal code');
   return buyerMarkPaid(String(req.params.claimId), buyer(req).id, str(req.body.utr, 40, 'UTR', false), { phone, address, pincode });
 }));
 
@@ -448,7 +464,7 @@ app.post('/api/claims/:claimId/release', h((req) => {
 // events: user:connection_status, open_channel:pre_messaging.
 
 const seenWebhookTypes = new Set<string>();
-const PAY_SCAM = /([\w.\-]{2,}@[a-z]{2,})|((?:\+?91[\s-]?)?[6-9]\d{4}[\s-]?\d{5})/gi;
+const PAY_SCAM = /([\w.\-]{2,}@[a-z][\w-]*(?:\.[\w-]+)*)|((?:paypal\.me|venmo\.com|cash\.app|wa\.me|gcash\.me)\/\S+)|(\$[A-Za-z][\w]{2,})|(\+?\d[\d\s().-]{7,}\d)/gi;
 
 /** Room chat runs through this before Nexconn delivers it: mask off-platform payment details and stamp the real name. */
 export function moderateRoomChat(senderId: string, channelId: string, messageType: string, rawContent: string) {
@@ -572,7 +588,7 @@ if (fs.existsSync(webDist)) {
     const img = db.prepare(`SELECT image_id FROM items WHERE drop_id = ? AND image_id IS NOT NULL ORDER BY (status = 'draft'), idx DESC LIMIT 1`).get(d.id) as { image_id: string } | undefined;
     const base = config.publicUrl || `${req.protocol}://${req.get('host')}`;
     const title = d.status === 'live' ? `🔴 ${s.shop} is dropping LIVE — first tap wins` : `${s.shop} on ClaimIt`;
-    const desc = `${d.title}. Tap to join the drop: claim items fairly, pay by UPI.`;
+    const desc = `${d.title}. Tap to join the drop: first tap wins, everyone sees the queue, pay the seller directly.`;
     const tags = [
       `<meta property="og:type" content="website" />`,
       `<meta property="og:site_name" content="ClaimIt" />`,
@@ -590,7 +606,7 @@ if (fs.existsSync(webDist)) {
       `<meta property="og:type" content="website" />`,
       `<meta property="og:site_name" content="ClaimIt" />`,
       `<meta property="og:title" content="ClaimIt — fair live drops for social sellers" />`,
-      `<meta property="og:description" content="Turn 'comment MINE to buy' into a fair claim queue everyone can see. First tap wins, pay by UPI." />`,
+      `<meta property="og:description" content="Turn 'comment MINE to buy' into a fair claim queue everyone can see. First tap wins, pay the seller directly." />`,
       `<meta property="og:image" content="${base}/og.png" />`,
       `<meta name="twitter:card" content="summary_large_image" />`,
     ].join('\n    ');

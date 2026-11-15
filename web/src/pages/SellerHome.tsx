@@ -25,8 +25,17 @@ export default function SellerHome() {
   );
 }
 
+/** Default market from the browser's region (sellers can change it). */
+function guessCurrency() {
+  const region = (navigator.languages?.[0] || navigator.language || '').split('-')[1]?.toUpperCase() ?? '';
+  const map: Record<string, string> = { IN: 'INR', US: 'USD', PH: 'PHP', ID: 'IDR', SG: 'SGD', MY: 'MYR', TH: 'THB', AE: 'AED', GB: 'GBP',
+    DE: 'EUR', FR: 'EUR', ES: 'EUR', IT: 'EUR', NL: 'EUR', IE: 'EUR', PT: 'EUR', BE: 'EUR', AT: 'EUR', FI: 'EUR' };
+  return map[region] ?? 'USD';
+}
+
 function Onboard({ onDone }: { onDone: (s: SellerSession) => void }) {
-  const [f, setF] = useState({ name: '', shop: '', upi: '', phone: '' });
+  const [f, setF] = useState({ name: '', shop: '', upi: '', phone: '', currency: guessCurrency() });
+  const india = f.currency === 'INR';
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [created, setCreated] = useState<(SellerSession & { phone: string | null }) | null>(null);
@@ -43,7 +52,7 @@ function Onboard({ onDone }: { onDone: (s: SellerSession) => void }) {
         <p className="mt-2 text-ink-2">One last thing: save your private login link, so you can open your shop on any phone or laptop — even if this browser is cleared.</p>
         <div className="mt-5 space-y-2">
           <a className="btn w-full bg-[#25D366] py-3.5 text-white" target="_blank" rel="noreferrer" onClick={() => setSaved(true)}
-            href={created.phone ? `https://wa.me/91${created.phone}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`}>
+            href={created.phone ? `https://wa.me/${created.currency === 'INR' ? '91' : ''}${created.phone.replace(/^\+/, '')}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`}>
             WhatsApp it to myself
           </a>
           <button className="btn w-full bg-white py-3 shadow-sm" onClick={async () => { try { await navigator.clipboard.writeText(link); setSaved(true); } catch { /* ignore */ } }}>
@@ -61,20 +70,27 @@ function Onboard({ onDone }: { onDone: (s: SellerSession) => void }) {
   return (
     <div className="mx-auto max-w-md pt-6">
       <h1 className="font-display text-4xl font-extrabold leading-tight">Set up your shop</h1>
-      <p className="mt-2 text-ink-2">Takes 20 seconds. Buyers pay you directly over UPI — ClaimIt never touches your money.</p>
+      <p className="mt-2 text-ink-2">Takes 20 seconds. Buyers pay you directly — by UPI, PayPal or any payment link. ClaimIt never touches your money.</p>
       <form className="mt-6 space-y-3" onSubmit={async (e) => {
         e.preventDefault(); setBusy(true); setErr('');
-        try { const s = await api.createSeller(f); setCreated({ id: s.id, key: s.key, name: s.name, shop: s.shop, upi: s.upi, phone: (s as any).phone ?? null }); }
+        try { const s = await api.createSeller(f); setCreated({ id: s.id, key: s.key, name: s.name, shop: s.shop, upi: s.upi, currency: s.currency, payLink: s.payLink, phone: (s as any).phone ?? null }); }
         catch (e2) { setErr(e2 instanceof Error ? e2.message : 'Something went wrong'); } finally { setBusy(false); }
       }}>
         <label className="block"><span className="mb-1 block text-sm font-semibold">Your name</span>
           <input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Asha" required maxLength={60} autoComplete="given-name" /></label>
         <label className="block"><span className="mb-1 block text-sm font-semibold">Shop name (shown to buyers)</span>
           <input className="input" value={f.shop} onChange={(e) => setF({ ...f, shop: e.target.value })} placeholder="Asha's Thrift Closet" required maxLength={60} /></label>
-        <label className="block"><span className="mb-1 block text-sm font-semibold">UPI ID for payments</span>
-          <input className="input" value={f.upi} onChange={(e) => setF({ ...f, upi: e.target.value.trim() })} placeholder="asha@okicici" required maxLength={80} autoCapitalize="none" /></label>
+        <label className="block"><span className="mb-1 block text-sm font-semibold">Where you sell</span>
+          <select className="input" value={f.currency} onChange={(e) => setF({ ...f, currency: e.target.value })}>
+            {[['USD', '🇺🇸 United States · $ USD'], ['INR', '🇮🇳 India · ₹ INR'], ['PHP', '🇵🇭 Philippines · ₱ PHP'], ['IDR', '🇮🇩 Indonesia · Rp IDR'], ['SGD', '🇸🇬 Singapore · S$ SGD'],
+              ['MYR', '🇲🇾 Malaysia · RM MYR'], ['THB', '🇹🇭 Thailand · ฿ THB'], ['AED', '🇦🇪 UAE · AED'], ['GBP', '🇬🇧 United Kingdom · £ GBP'], ['EUR', '🇪🇺 Europe · € EUR']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select></label>
+        <label className="block"><span className="mb-1 block text-sm font-semibold">How buyers pay you</span>
+          <input className="input" value={f.upi} onChange={(e) => setF({ ...f, upi: e.target.value.trim() })} required maxLength={300} autoCapitalize="none"
+            placeholder={india ? 'UPI ID, e.g. asha@okicici' : 'Payment link, e.g. https://paypal.me/yourshop'} />
+          <span className="mt-1 block text-xs text-muted">{india ? 'Your UPI ID — or any payment link starting with https://' : 'PayPal.me, Venmo, Stripe Payment Link, GCash, Wise… any https:// link'}</span></label>
         <label className="block"><span className="mb-1 block text-sm font-semibold">Your WhatsApp number <span className="font-normal text-muted">(to save your login link)</span></span>
-          <input className="input" type="tel" inputMode="numeric" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value.replace(/[^\d+ ]/g, '').slice(0, 14) })} placeholder="98765 43210" autoComplete="tel" /></label>
+          <input className="input" type="tel" inputMode="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value.replace(/[^\d+ ]/g, '').slice(0, 16) })} placeholder={india ? '98765 43210' : '+1 415 555 0123'} autoComplete="tel" /></label>
         {err && <p className="text-sm font-semibold text-hot-dark">{err}</p>}
         <button className="btn w-full bg-hot py-3.5 text-lg text-white" disabled={busy}>{busy ? <Spinner /> : 'Create my shop'}</button>
         <p className="text-center text-xs text-muted">By continuing you agree to our <Link to="/terms" className="underline">terms</Link> and <Link to="/privacy" className="underline">privacy policy</Link>.</p>
@@ -103,7 +119,7 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
     <div className="pt-4">
       <div className="text-sm font-semibold text-muted">Hi {seller.name} 👋</div>
       <h1 className="font-display text-4xl font-extrabold">{seller.shop}</h1>
-      <p className="text-sm text-muted">Payments go to <b className="text-ink-2">{seller.upi}</b></p>
+      <p className="text-sm text-muted">Payments go to <b className="text-ink-2">{seller.upi || seller.payLink}</b></p>
       <div className="mt-3 flex flex-wrap gap-2 text-sm">
         <Link to={`/s/${seller.id}`} className="btn bg-white px-4 py-2 shadow-sm">Your shop page ↗</Link>
         <Link to="/pricing" className="btn bg-white px-4 py-2 shadow-sm">Pricing</Link>
