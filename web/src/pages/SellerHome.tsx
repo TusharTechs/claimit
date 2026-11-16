@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { api, ApiError, sessions, type SellerDropSummary, type SellerSession } from '../api';
-import { ConfirmSheet, Logo, Spinner } from '../components/ui';
+import { api, ApiError, sessions, type Cohost, type SellerAccount, type SellerDropSummary, type SellerSession } from '../api';
+import { ConfirmSheet, CopyButton, Logo, Spinner } from '../components/ui';
+import { Crown, RotateCcw, UserPlus, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function SellerHome() {
@@ -149,22 +150,106 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
         <button className="btn mt-3 w-full bg-hot-dark py-3 text-white" disabled={busy || !title.trim()}>{busy ? <Spinner /> : 'Create drop room'}</button>
       </form>
 
+      <ProTeam shop={seller.shop} />
+
       <div className="mt-8">
         <div className="mb-2 text-xs font-bold uppercase tracking-wider text-muted">Your drops</div>
         {drops === null && <Spinner className="size-6 text-hot" />}
         {drops?.length === 0 && <p className="text-muted">No drops yet.</p>}
         <div className="space-y-2">
           {drops?.map((d) => (
-            <Link key={d.id} to={`/sell/${d.id}`} className="flex items-center justify-between rounded-2xl border border-line bg-card px-4 py-3 hover:border-ink">
-              <div className="min-w-0">
-                <div className="truncate font-semibold">{d.title}</div>
-                <div className="text-sm text-muted">{d.items} items · {d.sold} sold · {new Date(d.created).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</div>
-              </div>
-              <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${d.status === 'live' ? 'bg-hot-dark text-white' : 'bg-line text-ink-2'}`}>{d.status === 'live' ? 'LIVE' : 'ENDED'}</span>
-            </Link>
+            <div key={d.id} className="flex items-center gap-2 rounded-2xl border border-line bg-card pr-2 hover:border-ink">
+              <Link to={`/sell/${d.id}`} className="flex min-w-0 flex-1 items-center justify-between gap-2 px-4 py-3">
+                <div className="min-w-0">
+                  <div className="truncate font-semibold">{d.title}</div>
+                  <div className="text-sm text-muted">{d.items} items · {d.sold} sold · {new Date(d.created).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</div>
+                </div>
+                <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${d.status === 'live' ? 'bg-hot-dark text-white' : 'bg-line text-ink-2'}`}>{d.status === 'live' ? 'LIVE' : 'ENDED'}</span>
+              </Link>
+              {d.status === 'ended' && d.items > d.sold && (
+                <button className="btn shrink-0 bg-paper px-3 py-2 text-sm" title="New drop with the unsold items" onClick={async () => {
+                  try { const r = await api.runAgain(d.id); toast.success(`New drop ready with ${r.items} unsold item${r.items === 1 ? '' : 's'}`); nav(`/sell/${r.id}`); }
+                  catch (e) { toast.error(e instanceof Error ? e.message : 'Could not start the drop'); }
+                }}><RotateCcw className="size-4" /> Run again</button>
+              )}
+            </div>
           ))}
         </div>
       </div>
     </div>
+  );
+}
+
+/** Pro: a free 14-day trial and co-hosts (helpers who confirm payments and drop items from their own phone). */
+function ProTeam({ shop }: { shop: string }) {
+  const [acct, setAcct] = useState<SellerAccount | null>(null);
+  const [team, setTeam] = useState<Cohost[]>([]);
+  const [name, setName] = useState('');
+  const [invite, setInvite] = useState<{ name: string; link: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = async () => {
+    try {
+      const a = await api.sellerSession();
+      setAcct(a);
+      if (a.role === 'owner' && a.pro) setTeam(await api.cohosts());
+    } catch { /* offline: hide the card */ }
+  };
+  useEffect(() => { load(); }, []);
+  if (!acct) return null;
+  if (acct.role === 'cohost') {
+    return <div className="mt-6 rounded-2xl bg-sun-soft px-4 py-3 text-sm font-semibold">You're a co-host for {shop}{acct.cohostName ? ` (as ${acct.cohostName})` : ''}: you can run drops and confirm payments.</div>;
+  }
+  if (!acct.pro) {
+    return (
+      <section className="mt-6 flex flex-col gap-3 rounded-[26px] bg-ink p-5 text-white sm:flex-row sm:items-center">
+        <Crown className="size-8 shrink-0 text-sun" />
+        <div className="flex-1">
+          <div className="font-display text-xl font-bold">Go live with a co-host</div>
+          <p className="text-sm text-white/75">Pro lets a helper confirm payments and drop items from their own phone while you present. $9/month, 0% commission.</p>
+        </div>
+        {acct.trialUsed
+          ? <Link to="/pricing" className="btn shrink-0 bg-white px-5 py-2.5 text-ink">See Pro</Link>
+          : <button className="btn shrink-0 bg-sun px-5 py-2.5 text-ink" disabled={busy} onClick={async () => {
+              setBusy(true);
+              try { await api.proTrial(); toast.success('Pro trial started: 14 days free'); await load(); } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not start the trial'); } finally { setBusy(false); }
+            }}>{busy ? <Spinner /> : 'Start 14-day free trial'}</button>}
+      </section>
+    );
+  }
+  const link = invite ? (invite.link.startsWith('/') ? location.origin + invite.link : invite.link) : '';
+  return (
+    <section className="mt-6 rounded-[26px] border border-line bg-card p-5 shadow-[var(--shadow-card)]">
+      <div className="flex items-center gap-2">
+        <Crown className="size-5 text-[#b07a00]" />
+        <div className="font-display text-xl font-bold">Your team</div>
+        <span className="ml-auto rounded-full bg-sun-soft px-2.5 py-1 text-xs font-bold text-[#6b4600]">PRO{acct.proUntil ? ` · until ${new Date(acct.proUntil).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : ''}</span>
+      </div>
+      <p className="mt-1 text-sm text-muted">Co-hosts use their own login link: they can drop items, confirm payments and ship. They can't change your plan or team.</p>
+      <ul className="mt-3 space-y-1.5">
+        {team.map((c) => (
+          <li key={c.id} className="flex items-center justify-between rounded-xl bg-paper px-3 py-2 text-sm">
+            <span className="font-semibold">{c.name}</span>
+            <button className="grid size-7 place-items-center rounded-full hover:bg-line" aria-label={`Remove ${c.name}`} onClick={async () => { await api.removeCohost(c.id).catch(() => {}); load(); }}><X className="size-4" /></button>
+          </li>
+        ))}
+      </ul>
+      <form className="mt-3 flex gap-2" onSubmit={async (e) => {
+        e.preventDefault(); setBusy(true);
+        try { const r = await api.addCohost(name.trim()); setInvite(r); setName(''); load(); } catch (e2) { toast.error(e2 instanceof Error ? e2.message : 'Could not add'); } finally { setBusy(false); }
+      }}>
+        <input className="input !py-2 text-sm" placeholder="Co-host name, e.g. Riya" value={name} onChange={(e) => setName(e.target.value)} maxLength={40} aria-label="Co-host name" />
+        <button className="btn shrink-0 bg-ink px-4 text-sm text-white" disabled={busy || name.trim().length < 2}><UserPlus className="size-4" /> Add</button>
+      </form>
+      {invite && (
+        <div className="mt-3 rounded-2xl bg-mint-soft p-3 text-sm">
+          <div className="font-semibold">Send {invite.name} their private login link:</div>
+          <div className="mt-1 break-all font-mono text-xs text-ink-2">{link}</div>
+          <div className="mt-2 flex gap-2">
+            <CopyButton text={link} label="Copy link" className="!py-1.5" />
+            <a className="btn bg-[#25D366] px-4 py-1.5 text-sm text-white" target="_blank" rel="noreferrer" href={`https://wa.me/?text=${encodeURIComponent(`You're a co-host for ${shop} on ClaimIt. Open this on your phone (keep it private): ${link}`)}`}>WhatsApp</a>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }

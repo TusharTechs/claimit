@@ -300,7 +300,7 @@ export default function Landing() {
       <footer className="border-t border-line py-8">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 text-sm text-muted sm:flex-row sm:px-6">
           <span className="flex items-center gap-2"><LogoMark className="size-5" /> ClaimIt · fair live drops for social sellers everywhere</span>
-          <nav className="flex gap-4"><Link to="/pricing">Pricing</Link><Link to="/impact">Impact</Link><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link></nav>
+          <nav className="flex flex-wrap justify-center gap-4"><Link to="/pricing">Pricing</Link><Link to="/business">Business model</Link><Link to="/impact">Impact</Link><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link></nav>
           <span>Real-time by Nexconn</span>
         </div>
       </footer>

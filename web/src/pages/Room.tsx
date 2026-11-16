@@ -47,7 +47,12 @@ export default function Room() {
   const [ordersOpen, setOrdersOpen] = useState(!!deepOrder);
   useEffect(() => {
     if (!deepOrder || !ordersOpen) return;
-    const t = setTimeout(() => document.getElementById(`order-${deepOrder}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 600);
+    // Scroll to the order from My orders and flash it, so it's obvious which one you came for.
+    const t = setTimeout(() => {
+      const el = document.getElementById(`order-${deepOrder}`);
+      el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      el?.classList.add('anim-flash');
+    }, 600);
     return () => clearTimeout(t);
   }, [deepOrder, ordersOpen]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -821,7 +826,7 @@ function OrderCard({ c, buyerName, onChange, toast }: { c: MyClaim; buyerName: s
         <div className="size-14 shrink-0 overflow-hidden rounded-xl bg-line"><ItemThumb name={c.itemName} image={c.image} /></div>
         <div className="min-w-0 flex-1">
           <div className="truncate font-semibold">{c.itemName}</div>
-          <div className="text-sm text-ink-2">{money(c.price)}</div>
+          <div className="text-sm text-ink-2">{money(c.price, c.currency)}</div>
           <div className={`text-sm font-bold ${cls}`}>{text}</div>
         </div>
         {c.status === 'holding' && <div className="text-right"><div className="font-display text-2xl font-extrabold tabular-nums text-mint" role="timer">{mmss(left)}</div><div className="text-[11px] text-muted">left to pay</div></div>}

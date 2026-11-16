@@ -12,6 +12,7 @@ import Impact from './pages/Impact';
 import Legal from './pages/Legal';
 import Room from './pages/Room';
 import MyOrders from './pages/MyOrders';
+import Business from './pages/Business';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Toaster } from 'sonner';
 
@@ -30,6 +31,7 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/demo" element={<Navigate to="/d/demo" replace />} />
         <Route path="/s/:sellerId" element={<Shop />} />
         <Route path="/orders" element={<MyOrders />} />
+        <Route path="/business" element={<Business />} />
         <Route path="/pricing" element={<Pricing />} />
         <Route path="/impact" element={<Impact />} />
         <Route path="/privacy" element={<Legal page="privacy" />} />

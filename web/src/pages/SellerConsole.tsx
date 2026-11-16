@@ -25,6 +25,14 @@ export default function SellerConsole() {
     if (ids.length) try { const r = await api.people(dropId, ids); setPeople((p) => ({ ...p, ...r })); } catch { /* ignore */ }
   }, 300);
   const [viewers, setViewers] = useState<number | null>(null);
+  // Buyer questions that arrive while the seller is on another tab.
+  const [roomUnread, setRoomUnread] = useState(0);
+  const roomScroll = useRef<HTMLDivElement>(null);
+  const lastFeedId = feed[feed.length - 1]?.id;
+  useEffect(() => {
+    const el = roomScroll.current; // follow new messages only when already near the bottom
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  }, [lastFeedId]);
   const [unread, setUnread] = useState<Record<string, number>>({});
   const [inboxPeer, setInboxPeer] = useState<string | null>(null);
   const [chatUI, setChatUI] = useState(false); // Nexconn Chat UI inbox available (desktop + Nexconn mode)
@@ -79,7 +87,7 @@ export default function SellerConsole() {
       if (m.kind === 'open' && m.channelId === channelId) {
         if (m.type === MSG.CHAT || (m.type === MSG.SELLER_CHAT && m.sender === data?.drop.sellerId)) {
           const c = m.content as ChatContent;
-          if (!m.mine) { wantedNames.current.add(m.sender); resolveNames(); }
+          if (!m.mine) { wantedNames.current.add(m.sender); resolveNames(); if (tabRef.current !== 'room') setRoomUnread((n) => n + 1); }
           setFeed((f) => f.some((x) => x.id === m.id) ? f : [...f.slice(-120), { id: m.id, text: c.text, from: m.sender, mine: m.mine, kind: 'chat' }]);
         }
         else if (m.type === MSG.EVENT) { const ev = m.content as EventContent; setFeed((f) => [...f.slice(-120), { id: m.id, text: ev.text, kind: ev.kind }]); refresh(); }
@@ -242,12 +250,13 @@ export default function SellerConsole() {
         {/* Right panel */}
         <aside id="seller-panel" className="lg:sticky lg:top-[76px] lg:h-[calc(100dvh-96px)]">
           <div className="flex h-full min-h-[420px] flex-col rounded-[26px] border border-line bg-card p-3 shadow-[var(--shadow-card)]">
-            <div className="flex gap-1 rounded-full bg-paper p-1">
-              {([['pay', `Payments${needsAction ? ` (${needsAction})` : ''}`], ['room', 'Room'], ['inbox', `Inbox${totalUnread ? ` (${totalUnread})` : ''}`]] as [Tab, string][]).map(([k, l]) => (
-                <button key={k} onClick={() => setTab(k)} className={`flex-1 rounded-full py-2 text-sm font-semibold ${tab === k ? 'bg-ink text-white' : 'text-ink-2'}`}>{l}</button>
+            <div className="flex gap-1 rounded-full bg-paper p-1" role="tablist" aria-label="Seller panel">
+              {([['pay', `Payments${needsAction ? ` (${needsAction})` : ''}`], ['room', `Room${roomUnread ? ` (${roomUnread})` : ''}`], ['inbox', `Inbox${totalUnread ? ` (${totalUnread})` : ''}`]] as [Tab, string][]).map(([k, l]) => (
+                <button key={k} role="tab" aria-selected={tab === k} aria-controls="seller-tabpanel" onClick={() => { setTab(k); if (k === 'room') setRoomUnread(0); }}
+                  className={`flex-1 rounded-full py-2 text-sm font-semibold ${tab === k ? 'bg-ink text-white' : 'text-ink-2'}`}>{l}</button>
               ))}
             </div>
-            <div className="mt-3 flex min-h-0 flex-1 flex-col">
+            <div className="mt-3 flex min-h-0 flex-1 flex-col" id="seller-tabpanel" role="tabpanel">
               {tab === 'pay' && (
                 <div className="scroll-thin min-h-0 flex-1 space-y-2 overflow-y-auto">
                   {toConfirm.length === 0 && <p className="py-8 text-center text-sm text-muted">When a buyer claims and pays, confirm it here.</p>}
@@ -263,7 +272,7 @@ export default function SellerConsole() {
                 </div>
               )}
               {tab === 'room' && (
-                <div className="scroll-thin min-h-0 flex-1 space-y-1.5 overflow-y-auto">
+                <div ref={roomScroll} className="scroll-thin min-h-0 flex-1 space-y-1.5 overflow-y-auto">
                   {feed.length === 0 && <p className="py-8 text-center text-sm text-muted">Live chat and claims from the room appear here.</p>}
                   {feed.map((f) => f.kind === 'chat'
                     ? <div key={f.id} className="text-[14px]">{f.mine
@@ -588,7 +597,7 @@ function RoomReply({ onSend }: { onSend: (text: string) => Promise<void> }) {
   return (
     <div className="mt-2 border-t border-line pt-2">
       <div className="scroll-thin flex gap-1.5 overflow-x-auto pb-1.5">
-        {['Yes, true to size ✅', 'Ships worldwide 🌍', 'Next item in 1 min ⏳', 'Sorry, sold out 🙏'].map((q) => (
+        {['Yes, true to size ✅', 'Ships in 2–3 days 📦', 'Next item in 1 min ⏳', 'Sorry, sold out 🙏', 'Payment received, thank you! 💚'].map((q) => (
           <button key={q} className="shrink-0 rounded-full bg-paper px-3 py-1 text-xs font-semibold hover:bg-line" disabled={busy} onClick={() => send(q)}>{q}</button>
         ))}
       </div>

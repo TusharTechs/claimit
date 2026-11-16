@@ -12,6 +12,8 @@ export class ApiError extends Error {
 // ---------- local sessions ----------
 
 export interface SellerSession { id: string; key: string; name: string; shop: string; upi: string; currency?: string; payLink?: string | null; payNote?: string | null }
+export interface SellerAccount { role: 'owner' | 'cohost'; cohostName: string | null; pro: boolean; proUntil: number | null; trialUsed: boolean }
+export interface Cohost { id: string; name: string; created: number }
 export interface BuyerSession { id: string; key: string; name: string; isGuest?: boolean }
 
 const read = <T,>(k: string): T | null => {
@@ -85,7 +87,12 @@ export const api = {
   practiceDrop: () => req<{ id: string }>('POST', '/api/seller/practice', {}, 'seller'),
   createSeller: (b: { name: string; shop: string; upi: string; phone?: string; currency?: string }) =>
     req<SellerSession & { userId: string; token: string }>('POST', '/api/sellers', b),
-  sellerSession: () => req<SellerSession & { userId: string; token: string }>('POST', '/api/seller/session', {}, 'seller'),
+  sellerSession: () => req<SellerSession & SellerAccount & { userId: string; token: string }>('POST', '/api/seller/session', {}, 'seller'),
+  proTrial: () => req<{ pro: boolean; proUntil: number }>('POST', '/api/seller/pro/trial', {}, 'seller'),
+  cohosts: () => req<Cohost[]>('GET', '/api/seller/cohosts', undefined, 'seller'),
+  addCohost: (name: string) => req<{ id: string; name: string; link: string }>('POST', '/api/seller/cohosts', { name }, 'seller'),
+  removeCohost: (id: string) => req('DELETE', `/api/seller/cohosts/${id}`, undefined, 'seller'),
+  runAgain: (dropId: string) => req<{ id: string; notified: number; items: number }>('POST', `/api/seller/drops/${dropId}/again`, {}, 'seller'),
   sellerDrops: () => req<SellerDropSummary[]>('GET', '/api/seller/drops', undefined, 'seller'),
   sellerProfiles: (ids: string[]) =>
     req<{ userId: string; name: string }[]>('GET', `/api/seller/profiles?ids=${encodeURIComponent(ids.join(','))}`, undefined, 'seller'),

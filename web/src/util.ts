@@ -7,7 +7,7 @@ export const getCurrency = () => currentCurrency;
 /** "~2 min" / "~40 s" for a duration in seconds. */
 export const approx = (sec: number) => (sec < 90 ? `~${Math.max(5, Math.round(sec / 5) * 5)} s` : `~${Math.round(sec / 60)} min`);
 /** tel: link for a buyer's phone: Indian 10-digit numbers get +91, others are stored with their country code. */
-export const telHref = (phone: string) => `tel:${phone.startsWith('+') ? phone : currentCurrency === 'INR' && /^[6-9]\d{9}$/.test(phone) ? `+91${phone}` : `+${phone}`}`;
+export const telHref = (phone: string): string | undefined => phone.startsWith('+') ? `tel:${phone}` : currentCurrency === 'INR' && /^[6-9]\d{9}$/.test(phone) ? `tel:+91${phone}` : undefined; // unknown country code: no link
 export const money = (n: number, currency = currentCurrency) => {
   try {
     return new Intl.NumberFormat(currency === 'INR' ? 'en-IN' : 'en', { style: 'currency', currency, maximumFractionDigits: Number.isInteger(n) ? 0 : 2 }).format(n);

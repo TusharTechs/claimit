@@ -60,12 +60,13 @@ body {
 .anim-pop { animation: pop 0.35s cubic-bezier(.2,.9,.3,1.2) both; }
 .anim-rise { animation: rise 0.25s ease-out both; }
 .anim-ring { animation: pulse-ring 1.4s ease-out infinite; }
+.anim-flash { border-radius: 1rem; animation: pulse-ring 1.2s ease-out 3; }
 .anim-stamp { animation: stamp 0.45s cubic-bezier(.2,.9,.3,1.3) both; }
 .anim-live { animation: live-dot 1.2s ease-in-out infinite; }
 .anim-sheet { animation: sheet 0.28s cubic-bezier(.2,.8,.2,1) both; }
 
 @media (prefers-reduced-motion: reduce) {
-  .anim-pop, .anim-rise, .anim-ring, .anim-stamp, .anim-live, .anim-sheet { animation: none; }
+  .anim-pop, .anim-rise, .anim-ring, .anim-flash, .anim-stamp, .anim-live, .anim-sheet { animation: none; }
 }
 
 /* sonner toasts in brand colours */

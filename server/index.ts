@@ -54,13 +54,30 @@ const str = (v: unknown, max: number, field: string, required = true) => {
 
 // ---------- auth helpers ----------
 
-function seller(req: Request) {
+type SellerAuth = { id: string; name: string; shop: string; upi: string; currency: string; pay_link: string | null; pay_note: string | null;
+  pro_until: number | null; trial_used: number; role: 'owner' | 'cohost'; cohostName: string | null };
+const SELLER_COLS = 'id, name, shop, upi, currency, pay_link, pay_note, pro_until, trial_used';
+
+/** The shop's owner (seller key) or one of its co-hosts (own key, Pro). Never returns the owner's key. */
+function seller(req: Request): SellerAuth {
   const id = req.header('x-seller-id') || '';
   const key = req.header('x-seller-key') || '';
-  const row = db.prepare('SELECT * FROM sellers WHERE id = ? AND key = ?').get(id, key) as
-    { id: string; name: string; shop: string; upi: string; currency: string; pay_link: string | null; pay_note: string | null } | undefined;
-  if (!row) throw new AppError(401, 'NO_AUTH', 'Seller session not found');
-  return row;
+  const owner = db.prepare(`SELECT ${SELLER_COLS} FROM sellers WHERE id = ? AND key = ?`).get(id, key) as Omit<SellerAuth, 'role' | 'cohostName'> | undefined;
+  if (owner) return { ...owner, role: 'owner', cohostName: null };
+  const co = db.prepare('SELECT name FROM cohosts WHERE seller_id = ? AND key = ?').get(id, key) as { name: string } | undefined;
+  if (co) {
+    const s = db.prepare(`SELECT ${SELLER_COLS} FROM sellers WHERE id = ?`).get(id) as Omit<SellerAuth, 'role' | 'cohostName'>;
+    if (isPro(s)) return { ...s, role: 'cohost', cohostName: co.name };
+    throw new AppError(401, 'NO_AUTH', 'Co-host access is paused: the shop\'s Pro plan has ended');
+  }
+  throw new AppError(401, 'NO_AUTH', 'Seller session not found');
+}
+const isPro = (s: { pro_until: number | null }) => !!s.pro_until && s.pro_until > now();
+/** Account-level actions (team, plan) are for the shop owner only. */
+function ownerOnly(req: Request) {
+  const s = seller(req);
+  if (s.role !== 'owner') throw new AppError(403, 'OWNER_ONLY', 'Only the shop owner can do this');
+  return s;
 }
 
 function buyer(req: Request) {
@@ -130,7 +147,46 @@ app.post('/api/sellers', limit('seller', 10, 60 * 60_000), h(async (req) => {
 app.post('/api/seller/session', h(async (req) => {
   const s = seller(req);
   const userId = sellerUserId(s.id);
-  return { ...s, payLink: s.pay_link, payNote: s.pay_note, userId, token: await nexconn.token(userId, s.shop) };
+  return { id: s.id, name: s.name, shop: s.shop, upi: s.upi, currency: s.currency, payLink: s.pay_link, payNote: s.pay_note,
+    role: s.role, cohostName: s.cohostName, pro: isPro(s), proUntil: s.pro_until, trialUsed: !!s.trial_used,
+    userId, token: await nexconn.token(userId, s.shop) };
+}));
+
+// ---------- Pro: free trial + co-hosts ----------
+
+/** 14-day Pro trial, once per shop. (Billing would extend pro_until; the plan check is the same either way.) */
+app.post('/api/seller/pro/trial', h((req) => {
+  const s = ownerOnly(req);
+  if (isPro(s)) return { pro: true, proUntil: s.pro_until };
+  if (s.trial_used) throw new AppError(409, 'TRIAL_USED', 'Your free trial has been used. Pro billing opens soon.');
+  const until = now() + 14 * 86_400_000;
+  db.prepare('UPDATE sellers SET pro_until = ?, trial_used = 1 WHERE id = ?').run(until, s.id);
+  return { pro: true, proUntil: until };
+}));
+
+/** Co-hosts: helpers who run the console (confirm payments, drop items, ship) on their own device with their own key. */
+app.get('/api/seller/cohosts', h((req) => {
+  const s = ownerOnly(req);
+  return db.prepare('SELECT id, name, created FROM cohosts WHERE seller_id = ? ORDER BY created').all(s.id);
+}));
+
+app.post('/api/seller/cohosts', limit('cohost', 20, 60 * 60_000), h((req) => {
+  const s = ownerOnly(req);
+  if (!isPro(s)) throw new AppError(402, 'PRO_ONLY', 'Co-hosts are a Pro feature. Start your free trial to add one.');
+  const name = str(req.body.name, 40, 'Co-host name');
+  const n = (db.prepare('SELECT COUNT(*) AS n FROM cohosts WHERE seller_id = ?').get(s.id) as { n: number }).n;
+  if (n >= 5) throw new AppError(409, 'TOO_MANY', 'Up to 5 co-hosts per shop');
+  const id = rid(8);
+  const key = rid(24);
+  db.prepare('INSERT INTO cohosts (id, seller_id, name, key, created) VALUES (?, ?, ?, ?, ?)').run(id, s.id, name, key, now());
+  // The invite is a login link for this co-host only; removing them revokes it.
+  return { id, name, link: `${config.publicUrl || ''}/sell/login#${s.id}.${key}` };
+}));
+
+app.delete('/api/seller/cohosts/:id', h((req) => {
+  const s = ownerOnly(req);
+  db.prepare('DELETE FROM cohosts WHERE id = ? AND seller_id = ?').run(String(req.params.id), s.id);
+  return { ok: true };
 }));
 
 /** Names for Nexconn Chat UI (its reqUserProfiles hook): buyers who ordered from this seller, plus the seller. */
@@ -159,6 +215,21 @@ app.post('/api/seller/drops', h(async (req) => {
   const title = str(req.body.title, 80, 'Drop title');
   const liveUrl = str(req.body.liveUrl, 300, 'Live link', false) || null;
   const hold = holdMinutes(req.body.holdMinutes) ?? Math.round(config.holdSeconds / 60);
+  return openDrop(req, s, title, liveUrl, hold);
+}));
+
+/** "Run again": a new drop with the same settings and every item that didn't sell last time (photos, names, prices). */
+app.post('/api/seller/drops/:dropId/again', h(async (req) => {
+  const { s, d } = ownDrop(req);
+  const left = db.prepare(`SELECT name, price, image_id FROM items WHERE drop_id = ? AND status != 'sold' ORDER BY idx`).all(d.id) as { name: string; price: number; image_id: string | null }[];
+  const title = d.title.replace(/ · again( \d+)?$/, '').slice(0, 70) + ' · again';
+  const r = await openDrop(req, s, title, d.live_url, Math.round((d.hold_seconds || config.holdSeconds) / 60));
+  left.slice(0, MAX_ITEMS_PER_DROP).forEach((it, i) => db.prepare('INSERT INTO items (id, drop_id, name, price, image_id, status, idx) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(rid(8), r.id, it.name, it.price, it.image_id, 'draft', i + 1));
+  return { ...r, items: Math.min(left.length, MAX_ITEMS_PER_DROP) };
+}));
+
+async function openDrop(req: Request, s: { id: string; shop: string }, title: string, liveUrl: string | null, hold: number) {
   const id = rid(8);
   const channelId = `drop_${id}`;
   await nexconn.createOpenChannel(channelId);
@@ -172,7 +243,7 @@ app.post('/api/seller/drops', h(async (req) => {
       `${s.shop} is dropping live now`, followers.slice(i, i + 1000)).catch((e) => console.error('[notify followers]', e?.message));
   }
   return { id, notified: followers.length };
-}));
+}
 
 app.get('/api/seller/drops/:dropId', h(async (req) => {
   const { d } = ownDrop(req);
