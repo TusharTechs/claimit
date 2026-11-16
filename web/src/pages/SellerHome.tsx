@@ -152,10 +152,6 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
         <button className="btn mt-3 w-full bg-hot-dark py-3 text-white" disabled={busy || !title.trim()}>{busy ? <Spinner /> : 'Create drop room'}</button>
       </form>
 
-      <ValueCard />
-      <ProTeam shop={seller.shop} />
-      <InviteCard sellerId={seller.id} shop={seller.shop} />
-
       <div className="mt-8">
         <div className="mb-2 text-xs font-bold uppercase tracking-wider text-muted">Your drops</div>
         {drops === null && <Spinner className="size-6 text-hot" />}
@@ -182,6 +178,11 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
           ))}
         </div>
       </div>
+
+      {/* Returning sellers reach their drops first; value, team and invites follow. */}
+      <ValueCard />
+      <ProTeam shop={seller.shop} />
+      <InviteCard sellerId={seller.id} shop={seller.shop} />
     </div>
   );
 }
@@ -203,24 +204,25 @@ function ProTeam({ shop }: { shop: string }) {
   };
   useEffect(() => { load(); }, []);
   if (!acct) return null;
+  const trialDays = acct.referred ? 30 : 14; // invited shops get a month
   if (acct.role === 'cohost') {
     return <div className="mt-6 rounded-2xl bg-sun-soft px-4 py-3 text-sm font-semibold">You're a co-host for {shop}{acct.cohostName ? ` (as ${acct.cohostName})` : ''}: you can run drops and confirm payments.</div>;
   }
   if (!acct.pro) {
     return (
-      <section className="mt-6 flex flex-col gap-3 rounded-[26px] bg-ink p-5 text-white sm:flex-row sm:items-center">
+      <section className="mt-6 flex flex-wrap items-start gap-3 rounded-[26px] bg-ink p-5 text-white">
         <Crown className="size-8 shrink-0 text-sun" />
-        <div className="flex-1">
+        <div className="min-w-[14rem] flex-1">
           <div className="font-display text-xl font-bold">Go live with a co-host</div>
-          <p className="text-sm text-white/75">Pro lets a helper confirm payments and drop items from their own phone while you present. $9/month, 0% commission. The trial needs no card: after 14 days you're simply back on Free.</p>
+          <p className="text-sm text-white/75">Pro lets a helper confirm payments and drop items from their own phone while you present. $9/month, 0% commission. The trial needs no card: after {trialDays} days you're simply back on Free.</p>
+          {acct.founding && <span className="mt-2 inline-block rounded-full bg-sun px-2.5 py-1 text-xs font-bold text-ink">Founding seller · 50% off Pro year one</span>}
         </div>
-        {acct.founding && <span className="shrink-0 rounded-full bg-sun px-2.5 py-1 text-xs font-bold text-ink">Founding seller · 50% off Pro year one</span>}
         {acct.trialUsed
-          ? <div className="shrink-0 text-sm text-white/80"><b className="text-white">Your trial has ended.</b> You're on Free and nothing was lost.<br />Co-hosts are paused until Pro.{' '}<Link to="/pricing" className="font-semibold text-sun underline">See Pro</Link></div>
-          : <button className="btn shrink-0 bg-sun px-5 py-2.5 text-ink" disabled={busy} onClick={async () => {
+          ? <div className="w-full text-sm text-white sm:w-auto sm:max-w-xs"><b className="text-white">Your trial has ended.</b> You're on Free and nothing was lost.<br />Co-hosts are paused until Pro.{' '}<Link to="/pricing" className="font-semibold text-sun underline">See Pro</Link></div>
+          : <button className="btn w-full shrink-0 self-center bg-sun px-5 py-2.5 text-ink sm:w-auto" disabled={busy} onClick={async () => {
               setBusy(true);
-              try { await api.proTrial(); toast.success('Pro trial started: 14 days free'); await load(); } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not start the trial'); } finally { setBusy(false); }
-            }}>{busy ? <Spinner /> : 'Start 14-day free trial'}</button>}
+              try { await api.proTrial(); toast.success(`Pro trial started: ${trialDays} days free`); await load(); } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not start the trial'); } finally { setBusy(false); }
+            }}>{busy ? <Spinner /> : `Start ${trialDays}-day free trial`}</button>}
       </section>
     );
   }
@@ -278,14 +280,14 @@ function ValueCard() {
   useEffect(() => { api.insights().then(setV).catch(() => {}); }, []);
   if (!v || v.drops === 0) return null;
   const m = (n: number) => money(n, v.currency);
-  const paysForPro = v.rescuedThisMonth > 0;
+  const paysForPro = !!v.coversPro; // rescued this month, converted to USD, is at least the $9 Pro price
   return (
     <section className="mt-6 rounded-[26px] bg-mint p-5 text-white shadow-[var(--shadow-card)]">
-      <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-white/80"><TrendingUp className="size-4" /> What fair drops did for you</div>
+      <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-white"><TrendingUp className="size-4" /> What fair drops did for you</div>
       <div className="mt-2 grid gap-3 sm:grid-cols-3">
-        <div><div className="font-display text-3xl font-extrabold">{m(v.rescuedAllTime)}</div><div className="text-sm text-white/95">rescued from no-shows, all time: sales comment-selling would have lost</div></div>
-        <div><div className="font-display text-3xl font-extrabold">{m(v.revenue)}</div><div className="text-sm text-white/95">sold through {v.drops} drop{v.drops === 1 ? '' : 's'}, 0% commission</div></div>
-        <div><div className="font-display text-3xl font-extrabold">{m(v.rescuedThisMonth)}</div><div className="text-sm text-white/95">rescued in the last 30 days{paysForPro ? ' — more than covers Pro' : ''}</div></div>
+        <div><div className="font-display text-3xl font-extrabold">{m(v.rescuedAllTime)}</div><div className="text-sm text-white">rescued from no-shows, all time: sales comment-selling would have lost</div></div>
+        <div><div className="font-display text-3xl font-extrabold">{m(v.revenue)}</div><div className="text-sm text-white">sold through {v.drops} drop{v.drops === 1 ? '' : 's'}, 0% commission</div></div>
+        <div><div className="font-display text-3xl font-extrabold">{m(v.rescuedThisMonth)}</div><div className="text-sm text-white">rescued in the last 30 days{paysForPro ? ' — more than covers Pro' : ''}</div></div>
       </div>
       {v.pro ? (
         <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
@@ -296,11 +298,11 @@ function ValueCard() {
             ['Your avg confirm', v.avgConfirmSec ? approx(v.avgConfirmSec) : '—'],
             ['Best hour to drop', v.bestHourUtc != null ? new Date(Date.UTC(2020, 0, 1, v.bestHourUtc)).toLocaleTimeString(undefined, { hour: 'numeric' }) : '—'],
           ] as const).map(([k, val]) => (
-            <div key={k} className="rounded-xl bg-white/15 px-3 py-2"><div className="font-display text-lg font-extrabold">{val}</div><div className="text-[11px] text-white/95">{k}</div></div>
+            <div key={k} className="rounded-xl bg-[#075c3c] px-3 py-2"><div className="font-display text-lg font-extrabold">{val}</div><div className="text-xs text-white">{k}</div></div>
           ))}
         </div>
       ) : (
-        <div className="mt-4 flex items-center gap-2 rounded-xl bg-white/15 px-3 py-2 text-sm"><Lock className="size-4 shrink-0" />
+        <div className="mt-4 flex items-center gap-2 rounded-xl bg-[#075c3c] px-3 py-2 text-sm"><Lock className="size-4 shrink-0" />
           <span>Pro shows your no-show rate, repeat buyers, time to pay and the best hour to drop. <Link to="/pricing" className="font-semibold underline">See Pro</Link></span></div>
       )}
     </section>

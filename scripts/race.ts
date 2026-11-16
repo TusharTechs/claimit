@@ -92,6 +92,28 @@ const again = (await call('POST', `/api/seller/drops/${drop.id}/again`, {}, sh))
 const againItems = (await call('GET', `/api/seller/drops/${again.id}`, undefined, sh)).json.items as Json[];
 check(!againItems.some((i) => i.name === 'Held jacket') && again.skippedHeld >= 1, 'Run again skips the item still on hold in the old drop');
 await call('POST', `/api/seller/drops/${again.id}/end`, {}, sh);
+// Run again is refused while the drop is still live.
+const live2 = (await call('POST', '/api/seller/drops', { title: 'Still live' }, sh)).json;
+check((await call('POST', `/api/seller/drops/${live2.id}/again`, {}, sh)).status === 409, 'Run again on a live drop is refused');
+
+// Every queue value in the room's metadata is signed by the server, and a forged value fails verification.
+const { createPublicKey, verify } = await import('node:crypto');
+const cfg = (await call('GET', '/api/config')).json;
+if (cfg.mode === 'mock' && cfg.metaKey) {
+  const pub = createPublicKey({ key: Buffer.from(cfg.metaKey, 'base64'), format: 'der', type: 'spki' });
+  const ok = (ch: string, k: string, v: string) => {
+    const { d, g } = JSON.parse(v);
+    return verify('sha256', Buffer.from(`${ch}|${k}|${d}`), { key: pub, dsaEncoding: 'ieee-p1363' }, Buffer.from(g, 'base64'));
+  };
+  const ch = `drop_${drop.id}`;
+  const meta = (await call('GET', `/api/mock/metadata?channelId=${ch}`)).json as Record<string, string>;
+  const k = `i_${item.id}`;
+  check(!!meta[k] && ok(ch, k, meta[k]!), 'queue metadata carries a valid server signature');
+  const forged = JSON.stringify({ ...JSON.parse(meta[k]!), d: JSON.stringify({ ...JSON.parse(JSON.parse(meta[k]!).d), holder: { id: 'b_attacker', name: 'Attacker' } }) });
+  check(!ok(ch, k, forged), 'a forged queue value (fake holder) fails verification');
+  check(!ok(`drop_${again.id}`, k, meta[k]!), 'a genuine value replayed into another room fails verification');
+}
+await call('POST', `/api/seller/drops/${live2.id}/end`, {}, sh);
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nAll checks passed: no double-claims under contention.');
 process.exit(failed ? 1 : 0);
 export {};

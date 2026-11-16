@@ -144,6 +144,8 @@ export interface AppConfig {
   mode: 'nexconn' | 'mock';
   appKey: string | null;
   area: string;
+  /** Public key (SPKI, base64) for verifying server-signed metadata. */
+  metaKey: string;
 }
 
 export const itemKey = (itemId: string) => `i_${itemId}`;

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { rt, type RtMessage } from '../rt';
 import { MSG, ORDER_STATUS, type OrderContent, type OrderUpdateContent } from '../../../shared/types';
+import { verifyOrderStatus } from '../verify';
 import { money } from '../util';
 
 /** 1:1 Direct channel between a buyer and the seller: order cards, status updates and free text. */
@@ -81,9 +82,25 @@ function Bubble({ m, peerId }: { m: RtMessage; peerId: string }) {
   if ((m.type === MSG.ORDER || m.type === MSG.ORDER_UPDATE) && !trusted) {
     return <div className="mx-auto max-w-xs rounded-xl bg-hot-soft px-3 py-2 text-center text-[13px] text-hot-dark">⚠️ Hidden: a fake order message</div>;
   }
-  if (m.type === MSG.ORDER) {
+  if (m.type === MSG.ORDER) return <OrderBubble m={m} />;
+  return <PlainBubble m={m} />;
+}
+
+/** The status chip only shows a status the server signed: a buyer can edit its own message's metadata via the SDK. */
+function useSignedStatus(claimId: string, s?: string, g?: string) {
+  const [ok, setOk] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    verifyOrderStatus(claimId, s, g).then((v) => { if (alive) setOk(v ? s! : null); });
+    return () => { alive = false; };
+  }, [claimId, s, g]);
+  return ok;
+}
+
+function OrderBubble({ m }: { m: RtMessage }) {
+  {
     const o = m.content as OrderContent;
-    const st = ORDER_STATUS[m.meta?.s ?? ''];
+    const st = ORDER_STATUS[useSignedStatus(o.claimId, m.meta?.s, m.meta?.g) ?? ''];
     const chip = st ? { sun: 'bg-sun-soft text-[#6b4600]', mint: 'bg-mint text-white', muted: 'bg-line text-ink-2', hot: 'bg-hot-soft text-hot-dark' }[st.tone] : '';
     return (
       <div className="anim-rise mx-auto w-full max-w-xs rounded-2xl border-2 border-mint/40 bg-mint-soft p-3">
@@ -101,6 +118,9 @@ function Bubble({ m, peerId }: { m: RtMessage; peerId: string }) {
       </div>
     );
   }
+}
+
+function PlainBubble({ m }: { m: RtMessage }) {
   if (m.type === MSG.ORDER_UPDATE) {
     const u = m.content as OrderUpdateContent;
     return <div className="mx-auto max-w-xs whitespace-pre-line rounded-xl bg-line/50 px-3 py-2 text-center text-[13px] text-ink-2">{u.text}</div>;

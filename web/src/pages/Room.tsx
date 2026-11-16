@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Check, ChevronRight, Lock, MessageCircle, Share2, ShieldCheck, ShoppingBag, Truck, WifiOff } from 'lucide-react';
 import { api, ApiError, sessions, type BuyerSession, type Shipping } from '../api';
 import { rt, type RtMessage } from '../rt';
+import { openSealed } from '../verify';
 import { Avatar, ConfirmSheet, CopyButton, ItemThumb, Logo, LogoMark, QR, Sheet, Spinner, celebrate, useToasts } from '../components/ui';
 import { DMThread } from '../components/DMThread';
 import { ReportShop } from '../components/ReportShop';
@@ -33,6 +34,8 @@ const scrub = (t: string) => t.replace(PAY_SCAM, (m, _e, _l, _t, phone) => (phon
 export default function Room() {
   const { dropId = '' } = useParams();
   const [drop, setDrop] = useState<PublicDrop | null>(null);
+  const itemsRef = useRef<PublicDrop['items']>([]);
+  itemsRef.current = drop?.items ?? [];
   const [state, setState] = useState<Record<string, ItemState>>({});
   const [dropState, setDropState] = useState<DropState | null>(null);
   const [error, setError] = useState('');
@@ -114,7 +117,7 @@ export default function Room() {
         if (cancelled) return;
         const { count, metadata } = await rt.enterOpen(drop.channelId);
         setViewers(count);
-        applyMeta(metadata);
+        applyMeta(drop.channelId, metadata);
         setConnected(true);
         api.join(dropId, new URLSearchParams(location.search).get('r')).catch(() => {});
         loadClaims();
@@ -133,13 +136,28 @@ export default function Room() {
     if (on && !wasOnline.current) {
       loadDrop();
       loadClaims();
-      if (drop?.channelId) rt.enterOpen(drop.channelId).then(({ metadata }) => applyMeta(metadata)).catch(() => {});
+      if (drop?.channelId) rt.enterOpen(drop.channelId).then(({ metadata }) => applyMeta(drop.channelId, metadata)).catch(() => {});
     }
     wasOnline.current = on;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [drop?.channelId]);
 
-  const applyMeta = (entries: Record<string, string | null>) => {
+  // Every metadata value must carry the server's signature for this channel and key: other viewers' SDKs can write
+  // open-channel metadata too, and a forged queue/"drop ended" must never reach the screen. Verified in arrival order.
+  const metaChain = useRef<Promise<void>>(Promise.resolve());
+  const applyMeta = (channelId: string, raw: Record<string, string | null>, onUnknownItem?: () => void) => {
+    metaChain.current = metaChain.current.then(async () => {
+      const opened: Record<string, string | null> = {};
+      await Promise.all(Object.entries(raw).map(async ([k, v]) => {
+        if (k !== 'drop' && !k.startsWith('i_')) return;
+        const d = await openSealed(channelId, k, v);
+        if (d !== null) opened[k] = d;
+      }));
+      if (Object.keys(opened).length) applyVerified(opened);
+      if (onUnknownItem && Object.keys(opened).some((k) => k.startsWith('i_') && !itemsRef.current.some((i) => itemKey(i.id) === k))) onUnknownItem();
+    }).catch(() => {});
+  };
+  const applyVerified = (entries: Record<string, string | null>) => {
     let mineChanged = false;
     const myId = meRef.current?.id;
     setState((cur) => {
@@ -178,8 +196,8 @@ export default function Room() {
       if (channelId !== drop.channelId) return;
       const entries: Record<string, string | null> = {};
       for (const c of changes) entries[c.key] = c.value;
-      applyMeta(entries);
-      if (Object.keys(entries).some((k) => k.startsWith('i_') && !drop.items.some((i) => itemKey(i.id) === k))) refreshDrop();
+      // A new item key (verified) means the seller dropped something we haven't loaded yet.
+      applyMeta(channelId, entries, refreshDrop);
     });
     const offCount = rt.onParticipants((channelId, n) => channelId === drop.channelId && setViewers(n));
     const offMsg = rt.onMessage((m: RtMessage) => {

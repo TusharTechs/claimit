@@ -67,6 +67,7 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .anim-pop, .anim-rise, .anim-ring, .anim-highlight, .anim-stamp, .anim-live, .anim-sheet { animation: none; }
+  .anim-highlight { outline: 3px solid var(--color-hot-dark); outline-offset: 2px; } /* still visible, just not moving */
 }
 
 /* sonner toasts in brand colours */

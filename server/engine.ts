@@ -5,6 +5,7 @@
 import { config } from './config.ts';
 import { db, now, rid, tx } from './db.ts';
 import { nexconn } from './nexconn.ts';
+import { seal, signStatus } from './sign.ts';
 import { presence } from './presence.ts';
 import {
   MSG, itemKey,
@@ -71,7 +72,8 @@ export function sellerTrust(sellerId: string): SellerTrust {
     WHERE d.seller_id = ? AND d.practice = 0 AND c.status = 'paid' AND c.buyer_id NOT LIKE 'bot\\_%' ESCAPE '\\'`).get(sellerId) as { n: number; avg: number | null };
   const since = (db.prepare('SELECT created FROM sellers WHERE id = ?').get(sellerId) as { created: number } | undefined)?.created ?? now();
   const rej = (db.prepare(`SELECT COUNT(*) AS n FROM claims c JOIN drops d ON d.id = c.drop_id WHERE d.seller_id = ? AND d.practice = 0 AND c.status = 'rejected' AND c.paying_at IS NOT NULL`).get(sellerId) as { n: number }).n;
-  const reports = (db.prepare('SELECT COUNT(*) AS n FROM shop_reports WHERE seller_id = ?').get(sellerId) as { n: number }).n;
+  // Verified-buyer reports that haven't been dismissed on review.
+  const reports = (db.prepare(`SELECT COUNT(*) AS n FROM shop_reports WHERE seller_id = ? AND status != 'dismissed'`).get(sellerId) as { n: number }).n;
   return { orders: r.n, since, avgConfirmSec: r.avg ? Math.round(r.avg / 1000) : null, rejectedPct: r.n + rej ? Math.round((rej / (r.n + rej)) * 100) : 0, reports };
 }
 
@@ -143,8 +145,10 @@ function publish(dropId: string, itemIds: string[], extra: Record<string, string
   pendingWrites.set(d.channel_id, batch);
   return enqueue(d.channel_id, () => {
     pendingWrites.delete(d.channel_id); // from here on, new changes start a fresh write
-    const entries: Record<string, string> = { ...batch.extra };
-    for (const id of batch.ids) entries[itemKey(id)] = JSON.stringify(itemState(id));
+    const raw: Record<string, string> = { ...batch.extra };
+    for (const id of batch.ids) raw[itemKey(id)] = JSON.stringify(itemState(id));
+    // Signed and bound to channel+key: viewers' SDKs can write metadata too, and clients ignore anything unsigned.
+    const entries = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, seal(d.channel_id, k, v)]));
     return withRetry(() => nexconn.setMetadata(d.channel_id, sellerUserId(d.seller_id), entries));
   });
 }
@@ -185,7 +189,7 @@ function sendOrder(claimId: string) {
     let id: string | null;
     try {
       id = await nexconn.sendDirect(sellerUserId(s.id), c.buyer_id, MSG.ORDER, order,
-        `You got ${it.name}! Pay within ${fmtHold(holdSecondsFor(d.id))} to keep it.`, undefined, { s: 'holding' });
+        `You got ${it.name}! Pay within ${fmtHold(holdSecondsFor(d.id))} to keep it.`, undefined, { s: 'holding', g: signStatus(claimId, 'holding') });
     } catch (e) { failedOrderCards.add(claimId); throw e; } // only a send that actually failed is ever resent
     if (id) db.prepare('UPDATE claims SET order_msg_id = ? WHERE id = ?').run(id, claimId);
     else console.warn('[order card] no messageId returned; live status updates disabled for claim', claimId);
@@ -202,7 +206,7 @@ export function markShipped(claimId: string, sellerId: string, tracking: string)
   const sellerId_ = sellerUserId(q.drop(c.drop_id)!.seller_id);
   enqueue(`dm:${c.buyer_id}`, async () => {
     const fresh = q.claim(claimId)!;
-    if (fresh.order_msg_id) await nexconn.setMessageMetadata(fresh.order_msg_id, sellerId_, fresh.buyer_id, { s: 'shipped', t: String(now()) });
+    if (fresh.order_msg_id) await nexconn.setMessageMetadata(fresh.order_msg_id, sellerId_, fresh.buyer_id, { s: 'shipped', t: String(now()), g: signStatus(claimId, 'shipped') });
     await nexconn.sendDirect(sellerId_, c.buyer_id, MSG.ORDER_UPDATE,
       { claimId, status: 'paid', text: `📦 ${it.name} is on its way!${tracking ? `\nTracking: ${tracking}` : ''}` }, `${it.name} has shipped`);
   });
@@ -216,7 +220,7 @@ function updateOrderCard(claimId: string) {
   return enqueue(`dm:${c.buyer_id}`, async () => {
     const fresh = q.claim(claimId)!;
     if (!fresh.order_msg_id) return;
-    await nexconn.setMessageMetadata(fresh.order_msg_id, sellerId, fresh.buyer_id, { s: fresh.status, t: String(now()) });
+    await nexconn.setMessageMetadata(fresh.order_msg_id, sellerId, fresh.buyer_id, { s: fresh.status, t: String(now()), g: signStatus(claimId, fresh.status) });
   });
 }
 

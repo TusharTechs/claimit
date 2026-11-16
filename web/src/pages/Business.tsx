@@ -141,7 +141,7 @@ export default function Business() {
               {b.live && (
                 <div className="mt-3 flex flex-wrap gap-1.5">
                   {b.live.map(([label, href]) => (
-                    <Link key={href} to={href} className="rounded-full bg-mint-soft px-2.5 py-1 text-xs font-bold text-mint hover:bg-mint hover:text-white">● Live: {label} →</Link>
+                    <Link key={href} to={href} className="rounded-full bg-mint px-2.5 py-1 text-xs font-bold text-white hover:bg-ink">● Live: {label} →</Link>
                   ))}
                 </div>
               )}
@@ -164,8 +164,18 @@ export default function Business() {
               Within the free plan (the first 10,000 MAU), each Pro seller is nearly all margin. And what the seller saves pays for Pro on its own: a <b>single sale rescued from a no-show</b> each month usually covers $9.
             </p>
             <p className="mt-3 text-[15px] text-white/90">
-              <b>LTV vs. acquisition cost:</b> at roughly 90% gross margin and an assumed 18-month lifetime, a Pro shop is worth about <b>$145</b>. Acquisition is mostly organic: buyers see ClaimIt in every drop, and sellers invite sellers with a month of Pro as the reward. That month costs well under $9 to deliver, so each referral pays back with the referred shop's first paid month.
+              <b>LTV vs. acquisition cost:</b> at roughly 90% gross margin and an assumed 18-month lifetime, a Pro shop is worth about <b>$145</b> ($9 × 0.9 × 18).
             </p>
+            <table className="mt-3 w-full text-left text-sm">
+              <thead className="text-white/70"><tr><th className="py-1 font-semibold">Channel</th><th className="font-semibold">Cost per new Pro shop (assumed)</th><th className="font-semibold">LTV : CAC</th></tr></thead>
+              <tbody className="text-white">
+                <tr className="border-t border-white/15"><td className="py-1.5">Buyer sees ClaimIt in a drop</td><td>≈ $0 (built into every drop and recap)</td><td>—</td></tr>
+                <tr className="border-t border-white/15"><td className="py-1.5">Seller invites seller</td><td>≈ $1: one month of Pro costs about 10% of $9 to serve</td><td>≈ 145 : 1</td></tr>
+                <tr className="border-t border-white/15"><td className="py-1.5">Live-selling coach or community</td><td>≈ $22: 20% of a first year at the founding price</td><td>≈ 6.6 : 1</td></tr>
+                <tr className="border-t border-white/15"><td className="py-1.5">Paid social ads (not planned at launch)</td><td>≈ $40–60 (typical small-business SaaS)</td><td>≈ 2.5–3.6 : 1</td></tr>
+              </tbody>
+            </table>
+            <p className="mt-2 text-xs text-white/70">A blended acquisition cost under $25 keeps LTV : CAC above 5 : 1. Every figure here is an assumption until pilot shops report real numbers.</p>
           </div>
           <div className="rounded-[26px] border border-line bg-card p-6 shadow-[var(--shadow-card)]">
             <h2 className="font-display text-2xl font-extrabold">Impact</h2>

@@ -21,6 +21,8 @@ const PRO: [string, boolean][] = [
 ];
 
 export default function Pricing() {
+  const [acct, setAcct] = useState<SellerAccount | null>(null);
+  useEffect(() => { if (sessions.seller()) api.sellerSession().then(setAcct).catch(() => {}); }, []);
   const [contact, setContact] = useState('');
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
@@ -46,13 +48,16 @@ export default function Pricing() {
           <div className="relative rounded-[28px] bg-ink p-7 text-white shadow-[var(--shadow-pop)]">
             <div className="absolute -top-3 right-6 flex items-center gap-1 rounded-full bg-sun px-3 py-1 text-xs font-bold text-ink"><Sparkles className="size-3.5" /> Founding sellers: 50% off year one</div>
             <div className="font-display text-2xl font-bold">Pro</div>
-            <div className="mt-2 font-display text-5xl font-extrabold">$9<span className="text-xl font-bold text-white/70">/month</span></div>
+            {acct?.founding
+              ? <div className="mt-2 font-display text-5xl font-extrabold">$4.50<span className="text-xl font-bold text-white/70">/month</span> <span className="align-middle text-lg font-bold text-white/60 line-through">$9</span><div className="text-sm font-semibold text-sun">Your founding-seller price for year one</div></div>
+              : <div className="mt-2 font-display text-5xl font-extrabold">$9<span className="text-xl font-bold text-white/70">/month</span></div>}
             <div className="text-sm text-white/70">Flat fee, still 0% commission · local pricing in every market</div>
             <ul className="mt-6 space-y-2.5">{PRO.map(([f, live]) => (
               <li key={f} className="flex gap-2"><Check className={`mt-0.5 size-5 shrink-0 ${live ? 'text-sun' : 'text-white/35'}`} />
                 <span>{f}{!live && <span className="ml-1.5 rounded-full bg-white/15 px-1.5 py-0.5 text-[11px] font-bold">SOON</span>}</span></li>
             ))}</ul>
-            <ProCta />
+            <ProCta acct={acct} />
+            {!(acct?.pro || acct?.role === 'cohost') && <>
             <p className="mt-5 text-sm font-semibold text-white/80">Get told when automatic payment confirmation launches:</p>
             {done ? (
               <div className="mt-2 rounded-2xl bg-white/10 p-4 text-center font-semibold">You're on the list 🎉 We'll tell you when it launches.</div>
@@ -67,6 +72,7 @@ export default function Pricing() {
                 <button className="btn shrink-0 bg-hot-dark px-5 text-white" disabled={busy || contact.trim().length < 6}>{busy ? <Spinner /> : 'Notify me'}</button>
               </form>
             )}
+            </>}
           </div>
         </div>
         <p className="mt-8 text-center text-sm text-muted">Live rooms and chat run on Nexconn, so a drop with 5 or 5,000 buyers costs you the same: nothing.</p>
@@ -77,13 +83,11 @@ export default function Pricing() {
 }
 
 /** Logged-in shop owners start the trial right here; everyone else creates a shop first (the trial button is on their home). */
-function ProCta() {
+function ProCta({ acct }: { acct: SellerAccount | null }) {
   const nav = useNavigate();
   const [busy, setBusy] = useState(false);
-  const [acct, setAcct] = useState<SellerAccount | null>(null);
   const toasts = useToasts();
   const loggedIn = !!sessions.seller();
-  useEffect(() => { if (loggedIn) api.sellerSession().then(setAcct).catch(() => {}); }, [loggedIn]);
   if (!loggedIn) {
     return <Link to="/sell" className="btn mt-7 w-full bg-sun py-3.5 text-ink">Create a shop, then try Pro free for 14 days</Link>;
   }
@@ -96,8 +100,8 @@ function ProCta() {
   return (
     <button className="btn mt-7 w-full bg-sun py-3.5 text-ink" disabled={busy} onClick={async () => {
       setBusy(true);
-      try { await api.proTrial(); celebrate({ x: 0.75, y: 0.6 }); toasts.push('Pro trial started: 14 days free', 'mint'); nav('/sell'); }
+      try { await api.proTrial(); celebrate({ x: 0.75, y: 0.6 }); toasts.push(`Pro trial started: ${acct.referred ? 30 : 14} days free`, 'mint'); nav('/sell'); }
       catch (e) { toasts.push(e instanceof Error ? e.message : 'Could not start the trial', 'hot'); } finally { setBusy(false); }
-    }}>{busy ? <Spinner /> : 'Start 14-day free trial — no card needed'}</button>
+    }}>{busy ? <Spinner /> : `Start ${acct.referred ? 30 : 14}-day free trial — no card needed`}</button>
   );
 }

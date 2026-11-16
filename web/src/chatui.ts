@@ -4,6 +4,7 @@ import type { NCChatUIApplication } from '@nexconn/chatui';
 import { MSG, ORDER_STATUS, type OrderContent, type OrderUpdateContent } from '../../shared/types';
 import { api } from './api';
 import { rt } from './rt';
+import { verifyOrderStatus } from './verify';
 import { hueFor, initials, money } from './util';
 
 /** Same coloured-initials avatar the rest of ClaimIt uses, as an SVG data URL for Chat UI. */
@@ -32,6 +33,8 @@ class OrderBubble extends HTMLElement {
   private _m: unknown;
   private _id = '';
   private _md: Record<string, string> = {};
+  private _vkey = '';
+  private _okS: string | null = null;
   set message(m: unknown) {
     this._m = m;
     this.track(String((m as any)?.messageId ?? (m as any)?.message?.messageId ?? ''));
@@ -54,7 +57,14 @@ class OrderBubble extends HTMLElement {
     const o = contentOf<OrderContent>(this._m);
     const raw = (this._m as any)?.message?.metadata ?? (this._m as any)?.metadata;
     const md: Record<string, string> = { ...(raw instanceof Map ? Object.fromEntries(raw) : raw || {}), ...this._md };
-    const st = ORDER_STATUS[md.s ?? ''];
+    // Only a server-signed status is shown (a buyer can edit its own message's metadata through the SDK).
+    const vkey = `${o.claimId}|${md.s}|${md.g}`;
+    if (this._vkey !== vkey) {
+      this._vkey = vkey;
+      this._okS = null;
+      verifyOrderStatus(o.claimId, md.s, md.g).then((ok) => { if (this._vkey === vkey) { this._okS = ok ? md.s! : null; this.render(); } });
+    }
+    const st = ORDER_STATUS[this._okS ?? ''];
     const chipColors = { sun: ['#fff1cc', '#6b4600'], mint: ['#0b8457', '#fff'], muted: ['#eadfd3', '#3a312a'], hot: ['#ffe6dc', '#d93a10'] } as const;
     const chip = st ? `<span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:${chipColors[st.tone][0]};color:${chipColors[st.tone][1]}">${esc(st.label)}</span>` : '';
     const img = o.image ? `<img src="${esc(o.image)}" alt="" style="width:48px;height:48px;border-radius:12px;object-fit:cover;flex-shrink:0">` : '';

@@ -26,6 +26,7 @@ export default function SellerConsole() {
   }, 300);
   const [viewers, setViewers] = useState<number | null>(null);
   const [role, setRole] = useState<'owner' | 'cohost'>('owner');
+  const [mobileSection, setMobileSection] = useState<'items' | 'panel'>('items'); // which part the phone tab bar shows as current
   // Buyer questions that arrive while the seller is on another tab.
   const [roomUnread, setRoomUnread] = useState(0);
   const roomScroll = useRef<HTMLDivElement>(null);
@@ -55,7 +56,7 @@ export default function SellerConsole() {
     }
     catch (e) { if (e instanceof ApiError && (e.status === 401 || e.status === 404)) nav('/sell'); }
   }, [dropId, nav]);
-  const refresh = useDebounced(load, 200);
+  const refresh = useDebounced(load, 500); // metadata bursts (a claim race) collapse into one refetch
 
   useEffect(() => { if (!seller) nav('/sell'); else load(); }, [load]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { const t = setInterval(load, 5000); return () => clearInterval(t); }, [load]);
@@ -155,7 +156,7 @@ export default function SellerConsole() {
 
   const goPanel = (k: Tab) => { setTab(k); if (k === 'room') setRoomUnread(0); document.getElementById('seller-panel')?.scrollIntoView({ behavior: 'smooth' }); };
   return (
-    <div className="min-h-full pb-20 lg:pb-0">
+    <div className="min-h-full pb-[calc(140px+env(safe-area-inset-bottom))] lg:pb-0">
       <header className="sticky top-0 z-30 border-b border-line bg-paper/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
           <Link to="/sell"><Logo className="text-lg" /></Link>
@@ -252,7 +253,7 @@ export default function SellerConsole() {
         </div>
 
         {/* Right panel */}
-        <aside id="seller-panel" className="lg:sticky lg:top-[76px] lg:h-[calc(100dvh-96px)]">
+        <aside id="seller-panel" className="scroll-mt-20 lg:sticky lg:top-[76px] lg:h-[calc(100dvh-96px)]">
           <div className="flex h-full min-h-[420px] flex-col rounded-[26px] border border-line bg-card p-3 shadow-[var(--shadow-card)]">
             <div className="flex gap-1 rounded-full bg-paper p-1" role="tablist" aria-label="Seller panel" onKeyDown={(e) => {
               // Arrow keys move between tabs (WAI-ARIA tabs pattern).
@@ -361,8 +362,9 @@ export default function SellerConsole() {
       {/* Phones: the panel sits below the item list, so a thumb-reach tab bar jumps straight to it. */}
       <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-line bg-card/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1.5 backdrop-blur lg:hidden" aria-label="Seller sections">
         {([['items', 'Items', 0], ['pay', 'Payments', needsAction], ['room', 'Room', roomUnread], ['inbox', 'Inbox', totalUnread]] as const).map(([k, l, n]) => (
-          <button key={k} className={`relative flex-1 rounded-xl py-2 text-sm font-semibold ${k !== 'items' && tab === k ? 'text-ink' : 'text-ink-2'}`}
-            onClick={() => (k === 'items' ? window.scrollTo({ top: 0, behavior: 'smooth' }) : goPanel(k))}>
+          <button key={k} aria-current={(k === 'items' ? mobileSection === 'items' : mobileSection === 'panel' && tab === k) ? 'true' : undefined}
+            className={`relative flex-1 rounded-xl py-2 text-sm font-semibold ${(k === 'items' ? mobileSection === 'items' : mobileSection === 'panel' && tab === k) ? 'bg-ink text-white' : 'text-ink-2'}`}
+            onClick={() => { if (k === 'items') { setMobileSection('items'); window.scrollTo({ top: 0, behavior: 'smooth' }); } else { setMobileSection('panel'); goPanel(k); } }}>
             {l}
             {n > 0 && <span className="absolute right-[18%] top-0.5 grid min-w-5 place-items-center rounded-full bg-hot-dark px-1 text-[11px] font-bold text-white">{n}</span>}
           </button>
@@ -370,7 +372,7 @@ export default function SellerConsole() {
       </nav>
 
       {nextDraft && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-[76px] z-40 flex justify-center px-4 lg:bottom-4 lg:justify-start lg:pl-[max(1rem,calc((100vw-72rem)/2+1rem))]">
+        <div className="pointer-events-none fixed inset-x-0 bottom-[calc(64px+env(safe-area-inset-bottom))] z-40 flex justify-center px-4 lg:bottom-4 lg:justify-start lg:pl-[max(1rem,calc((100vw-72rem)/2+1rem))]">
           <button className="btn anim-ring pointer-events-auto bg-hot-dark px-6 py-3.5 text-white shadow-[var(--shadow-pop)]" onClick={() => dropNextRef.current()}>
             <Play className="size-4 fill-current" /> Drop next: #{nextDraft.idx} {nextDraft.name.length > 28 ? nextDraft.name.slice(0, 27) + '…' : nextDraft.name}
             <kbd className="ml-1 hidden rounded-md bg-white/25 px-1.5 text-xs font-bold sm:inline">D</kbd>

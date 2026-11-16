@@ -3,6 +3,7 @@ import path from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { config } from './config.ts';
 import { db, now, rid, tx } from './db.ts';
+import { metaPublicKey } from './sign.ts';
 import { nexconn } from './nexconn.ts';
 import { mockbus } from './mockbus.ts';
 import { presence } from './presence.ts';
@@ -105,7 +106,7 @@ function ownDrop(req: Request) {
 
 // ---------- config & images ----------
 
-app.get('/api/config', h((): AppConfig => ({ mode: config.mode, appKey: config.mode === 'nexconn' ? config.nexconn.appKey : null, area: config.nexconn.area })));
+app.get('/api/config', h((): AppConfig => ({ mode: config.mode, appKey: config.mode === 'nexconn' ? config.nexconn.appKey : null, area: config.nexconn.area, metaKey: metaPublicKey })));
 
 app.get('/img/:id', (req, res) => {
   const row = db.prepare('SELECT mime, data FROM images WHERE id = ?').get(req.params.id) as { mime: string; data: Uint8Array } | undefined;
@@ -163,6 +164,7 @@ app.post('/api/seller/session', h(async (req) => {
   const userId = s.cohostId ? cohostUserId(s.cohostId) : sellerUserId(s.id);
   return { id: s.id, name: s.name, shop: s.shop, upi: s.upi, currency: s.currency, payLink: s.pay_link, payNote: s.pay_note,
     role: s.role, cohostName: s.cohostName, pro: isPro(s), proUntil: s.pro_until, trialUsed: !!s.trial_used, founding: !!s.founding,
+    proPrice: s.founding ? 4.5 : 9, // founding sellers: 50% off for their first year of Pro
     referred: !!s.ref_by, referrals: (db.prepare('SELECT COUNT(*) AS n FROM sellers WHERE ref_by = ?').get(s.id) as { n: number }).n,
     userId, token: await nexconn.token(userId, s.cohostName ? `${s.cohostName} (${s.shop} team)` : s.shop) };
 }));
@@ -237,6 +239,7 @@ app.post('/api/seller/drops', limit('drop', 20, 60 * 60_000), h(async (req) => {
 /** "Run again": a new drop with the same settings and every item that didn't sell last time (photos, names, prices). */
 app.post('/api/seller/drops/:dropId/again', limit('drop', 20, 60 * 60_000), h(async (req) => {
   const { s, d } = ownDrop(req);
+  if (d.status !== 'ended') throw new AppError(409, 'STILL_LIVE', 'End this drop first, then run it again');
   // Only items that are truly free: never dropped, pulled, or still up with nobody claiming. An item someone is holding or
   // paying for in the old drop can still be bought there, so copying it could sell the same piece twice.
   const left = db.prepare(`SELECT name, price, image_id FROM items i WHERE i.drop_id = ? AND (i.status IN ('draft','closed')
@@ -336,7 +339,10 @@ app.get('/api/seller/insights', h((req) => {
     rescuedAllTime: rescued(0),
     rescuedThisMonth: rescued(monthAgo),
     pro: isPro(s),
+    coversPro: false,
   };
+  // "Fair drops paid for Pro this month": only when the rescued sales, in USD, reach the $9 Pro price.
+  base.coversPro = base.rescuedThisMonth * (USD_RATE[s.currency] ?? 0) >= 9;
   if (!base.pro) return base;
   // Of all holds that ended in "paid" or "never paid", the share that never paid.
   const winners = one(`SELECT COUNT(*) FROM claims c JOIN drops d ON d.id = c.drop_id WHERE ${REAL} AND c.status IN ('paid','expired')`, s.id);
@@ -426,12 +432,16 @@ app.post('/api/seller/drops/:dropId/end', h((req) => {
   rewardReferrer(d.seller_id);
 }));
 
-/** When an invited shop finishes its first real drop with a sale, the shop that invited it gets a month of Pro. */
+/** When an invited shop finishes a real drop with independent customers, the shop that invited it gets a month of Pro. */
 function rewardReferrer(sellerId: string) {
   const s = db.prepare('SELECT ref_by, ref_rewarded FROM sellers WHERE id = ?').get(sellerId) as { ref_by: string | null; ref_rewarded: number } | undefined;
   if (!s?.ref_by || s.ref_rewarded) return;
-  const sold = (db.prepare(`SELECT COUNT(*) AS n FROM claims c JOIN drops d ON d.id = c.drop_id WHERE d.seller_id = ? AND d.practice = 0 AND c.status = 'paid'`).get(sellerId) as { n: number }).n;
-  if (!sold) return;
+  // Anti-farming: the invited shop needs real, independent customers. At least 3 different named buyers must have paid it,
+  // none of whom ever claimed from the inviting shop (so a seller can't open a second shop and buy from themselves).
+  const independent = (db.prepare(`SELECT COUNT(DISTINCT c.buyer_id) AS n FROM claims c JOIN drops d ON d.id = c.drop_id JOIN buyers b ON b.id = c.buyer_id
+    WHERE d.seller_id = ? AND d.practice = 0 AND c.status = 'paid' AND b.is_guest = 0
+      AND NOT EXISTS (SELECT 1 FROM claims c2 JOIN drops d2 ON d2.id = c2.drop_id WHERE d2.seller_id = ? AND c2.buyer_id = c.buyer_id)`).get(sellerId, s.ref_by) as { n: number }).n;
+  if (independent < 3) return;
   tx(() => {
     const r = db.prepare('SELECT pro_until FROM sellers WHERE id = ?').get(s.ref_by) as { pro_until: number | null };
     db.prepare('UPDATE sellers SET pro_until = ? WHERE id = ?').run(Math.max(now(), r.pro_until ?? 0) + 30 * 86_400_000, s.ref_by);
@@ -443,7 +453,7 @@ app.post('/api/seller/claims/:claimId/confirm', h((req) => sellerConfirm(String(
 app.post('/api/seller/claims/:claimId/shipped', h((req) => markShipped(String(req.params.claimId), seller(req).id, str(req.body.tracking, 120, 'Tracking', false))));
 
 /** A private rehearsal: a drop with 3 sample items the seller can open as a buyer in another tab. */
-app.post('/api/seller/practice', h(async (req) => {
+app.post('/api/seller/practice', limit('practice', 10, 60 * 60_000), h(async (req) => {
   const s = seller(req);
   const id = rid(8);
   const channelId = `drop_${id}`;
@@ -589,11 +599,18 @@ app.post('/api/pro-waitlist', limit('waitlist', 20, 60 * 60_000), h((req) => {
   return { ok: true };
 }));
 
-/** Buyer protection for direct payments: report a shop. Reports are reviewed, and count against the shop's trust line. */
+/**
+ * Buyer protection for direct payments: report a shop. Only a buyer who actually paid (or whose payment the shop rejected)
+ * in one of its real drops can report it, one report per buyer, so throwaway accounts can't brand a rival. Reports count
+ * on the shop's trust line while open or upheld; an admin can dismiss them (/api/admin/reports).
+ */
 app.post('/api/shops/:sellerId/report', limit('report', 10, 60 * 60_000), h((req) => {
   const b = buyer(req);
   const s = q.seller(String(req.params.sellerId));
   if (!s) throw new AppError(404, 'NO_SHOP', 'Shop not found');
+  const ordered = db.prepare(`SELECT 1 FROM claims c JOIN drops d ON d.id = c.drop_id WHERE d.seller_id = ? AND d.practice = 0 AND c.buyer_id = ?
+    AND (c.status IN ('paid','rejected') OR c.paying_at IS NOT NULL) LIMIT 1`).get(s.id, b.id);
+  if (!ordered) throw new AppError(403, 'NOT_A_BUYER', 'Only buyers who paid this shop can report it. Use "Report a problem" on your order instead.');
   const reason = ['no_item', 'payment_not_confirmed', 'scam', 'other'].includes(String(req.body.reason)) ? String(req.body.reason) : 'other';
   db.prepare('INSERT OR IGNORE INTO shop_reports (seller_id, buyer_id, reason, text, created) VALUES (?, ?, ?, ?, ?)')
     .run(s.id, b.id, reason, str(req.body.text, 500, 'Details', false) || null, now());
@@ -768,6 +785,23 @@ app.post('/api/nexconn/webhook', express.json({ limit: '1mb' }), (req, res) => {
 });
 
 // ---------- admin: traction numbers for the submission (set ADMIN_KEY in .env) ----------
+
+function admin(req: Request) {
+  const key = process.env.ADMIN_KEY;
+  if (!key || req.header('x-admin-key') !== key) throw new AppError(404, 'NOT_FOUND', 'Not found');
+}
+/** Review queue for shop reports: uphold (stays on the trust line) or dismiss (removed from it). */
+app.get('/api/admin/reports', h((req) => {
+  admin(req);
+  return db.prepare(`SELECT r.seller_id AS sellerId, s.shop, r.buyer_id AS buyerId, r.reason, r.text, r.status, r.created FROM shop_reports r
+    JOIN sellers s ON s.id = r.seller_id ORDER BY r.status = 'open' DESC, r.created DESC LIMIT 200`).all();
+}));
+app.post('/api/admin/reports/resolve', h((req) => {
+  admin(req);
+  const status = req.body.status === 'dismissed' ? 'dismissed' : 'upheld';
+  db.prepare('UPDATE shop_reports SET status = ? WHERE seller_id = ? AND buyer_id = ?').run(status, str(req.body.sellerId, 20, 'shop'), str(req.body.buyerId, 20, 'buyer'));
+  return { ok: true };
+}));
 
 app.get('/api/admin/stats', h((req) => {
   const key = process.env.ADMIN_KEY;

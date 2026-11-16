@@ -13,10 +13,10 @@ export class ApiError extends Error {
 
 export interface SellerSession { id: string; key: string; name: string; shop: string; upi: string; currency?: string; payLink?: string | null; payNote?: string | null }
 export interface SellerAccount { role: 'owner' | 'cohost'; cohostName: string | null; pro: boolean; proUntil: number | null; trialUsed: boolean;
-  founding?: boolean; referred?: boolean; referrals?: number }
+  founding?: boolean; referred?: boolean; referrals?: number; proPrice?: number }
 export interface Cohost { id: string; name: string; created: number }
 export interface Insights {
-  currency: string; drops: number; sold: number; revenue: number; rescuedAllTime: number; rescuedThisMonth: number; pro: boolean;
+  currency: string; drops: number; sold: number; revenue: number; rescuedAllTime: number; rescuedThisMonth: number; pro: boolean; coversPro?: boolean;
   noShowRate?: number | null; buyers?: number; repeatBuyers?: number; avgPaySec?: number; avgConfirmSec?: number | null; bestHourUtc?: number | null;
 }
 export interface BuyerSession { id: string; key: string; name: string; isGuest?: boolean }

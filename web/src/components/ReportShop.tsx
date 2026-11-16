@@ -22,11 +22,12 @@ export function ReportShop({ sellerId, shop, className = '' }: { sellerId: strin
       <button className={`inline-flex items-center gap-1.5 text-sm font-semibold text-muted underline ${className}`} onClick={() => setOpen(true)}>
         <Flag className="size-3.5" /> Report this shop
       </button>
-      <Sheet open={open} onClose={() => setOpen(false)} title={`Report ${shop}`}>
+      <Sheet open={open} onClose={() => { setOpen(false); if (state !== 'busy') { setState('idle'); setText(''); } }} title={`Report ${shop}`}>
         {state === 'done' ? (
           <div className="py-4 text-center">
             <p className="font-semibold">Thanks, we've got it.</p>
-            <p className="mt-1 text-sm text-muted">Reports show on the shop's trust line so other buyers can see them, and we review every one.</p>
+            <p className="mt-1 text-sm text-muted">Reports from buyers who ordered from this shop show on its trust line, so other buyers can see them.</p>
+            <button className="btn mt-4 w-full bg-ink py-3 text-white" onClick={() => { setOpen(false); setState('idle'); setText(''); }}>Done</button>
           </div>
         ) : (
           <form className="space-y-2 pb-2" onSubmit={async (e) => {
