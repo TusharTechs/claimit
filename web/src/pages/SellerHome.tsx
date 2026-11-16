@@ -252,6 +252,7 @@ function ProTeam({ shop }: { shop: string }) {
               setBusy(true);
               try { await api.proTrial(); toast.success(`Pro trial started: ${trialDays} days free`); await load(); } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not start the trial'); } finally { setBusy(false); }
             }}>{busy ? <Spinner /> : `Start ${trialDays}-day free trial`}</button>}
+        {!acct.trialUsed && <button className="w-full text-center text-sm font-semibold text-white underline sm:w-auto sm:self-center" onClick={() => setPayOpen(true)}>or pay now · ${acct.founding ? '4.50' : '9'}/mo</button>}
       </section></>
     );
   }
@@ -270,6 +271,7 @@ function ProTeam({ shop }: { shop: string }) {
         <div className="font-display text-xl font-bold">Your team</div>
         {acct.founding && <span className="ml-auto rounded-full bg-sun px-2.5 py-1 text-xs font-bold text-ink">Founding</span>}
         <span className={`${acct.founding ? '' : 'ml-auto '}rounded-full bg-sun-soft px-2.5 py-1 text-xs font-bold text-[#6b4600]`}>PRO{acct.proUntil ? ` · until ${new Date(acct.proUntil).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : ''}</span>
+        {!acct.paidPro && daysLeft > 5 && <button className="text-xs font-semibold text-ink-2 underline" onClick={() => setPayOpen(true)}>Keep Pro after the trial</button>}
       </div>
       <p className="mt-1 text-sm text-muted">Co-hosts use their own login link: they can drop items, confirm payments and ship. They can't change your plan or team.</p>
       <div className="mt-3 text-xs font-bold uppercase tracking-wider text-muted">Co-hosts · {team.length}/5</div>
