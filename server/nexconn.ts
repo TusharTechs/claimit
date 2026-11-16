@@ -20,6 +20,13 @@ const neverSent = (e: unknown) => {
   return ['ENOTFOUND', 'ECONNREFUSED', 'EAI_AGAIN', 'ECONNRESET', 'UND_ERR_CONNECT_TIMEOUT'].includes(code);
 };
 
+/** The last few hundred Nexconn interactions (Platform API calls we made, webhooks we received), for the operator page. */
+export const activity: { t: number; dir: 'api' | 'webhook'; what: string; ms?: number; code?: number | string; note?: string }[] = [];
+export function recordActivity(e: Omit<(typeof activity)[number], 't'>) {
+  activity.push({ t: Date.now(), ...e });
+  if (activity.length > 400) activity.splice(0, activity.length - 400);
+}
+
 /** Signed Platform API call. Message sends are not idempotent, so they only fail over when the request never left. */
 async function call<T = any>(path: string, body: unknown, idempotent = true): Promise<T> {
   let lastErr: unknown;
@@ -43,6 +50,7 @@ async function call<T = any>(path: string, body: unknown, idempotent = true): Pr
         signal: AbortSignal.timeout(5000),
       });
       const json: any = await res.json().catch(() => ({}));
+      recordActivity({ dir: 'api', what: path, ms: Date.now() - Number(timestamp), code: json.code ?? res.status });
       if (res.status >= 500) throw new NexconnError(path, res.status, json);
       if (json.code !== 0 && json.code !== 200) throw new NexconnError(path, json.code ?? res.status, json);
       return json as T;

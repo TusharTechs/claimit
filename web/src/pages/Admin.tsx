@@ -93,7 +93,9 @@ export default function Admin() {
                 ))}
               </div>
             )}
-            <h2 className="mt-6 font-display text-2xl font-extrabold">Pro payments</h2>
+            <NexconnFeed call={call} />
+
+            <h2 className="mt-8 font-display text-2xl font-extrabold">Pro payments</h2>
             <p className="text-sm text-muted">Dodo Payments confirm themselves through the webhook and appear here as confirmed. Only manual payments (payment link + reference) wait for you: check the reference, then confirm (adds 30 days; renewals stack).</p>
             <ul className="mt-3 space-y-2">
               {data.payments.length === 0 && <li className="text-sm text-muted">No payments yet.</li>}
@@ -136,5 +138,47 @@ export default function Admin() {
       <ConfirmSheet open={!!pending} onClose={() => setPending(null)} title="Are you sure?" tone="ink"
         body={pending?.question ?? ''} confirmLabel="Yes, do it" onConfirm={confirmPending} />
     </div>
+  );
+}
+
+interface Activity { t: number; dir: 'api' | 'webhook'; what: string; ms?: number; code?: number | string; note?: string }
+
+/** Live feed of the conversation between ClaimIt's server and Nexconn: Platform API calls out, webhooks in. */
+function NexconnFeed({ call }: { call: (method: string, path: string) => Promise<{ mode: string; now: number; events: Activity[] }> }) {
+  const [events, setEvents] = useState<Activity[]>([]);
+  const [mode, setMode] = useState('');
+  useEffect(() => {
+    let since = 0; let alive = true;
+    const tick = async () => {
+      try {
+        const r = await call('GET', `/api/admin/nexconn?since=${since}`);
+        if (!alive) return;
+        setMode(r.mode);
+        if (r.events.length) { since = r.events[r.events.length - 1]!.t; setEvents((e) => [...e, ...r.events].slice(-120)); }
+      } catch { /* keep the last list */ }
+    };
+    tick();
+    const t = setInterval(tick, 1500);
+    return () => { alive = false; clearInterval(t); };
+  }, [call]);
+  const clock = (t: number) => new Date(t).toLocaleTimeString(undefined, { hour12: false }) + '.' + String(t % 1000).padStart(3, '0');
+  return (
+    <section className="mt-6">
+      <h2 className="flex items-center gap-2 font-display text-2xl font-extrabold">Nexconn activity <span className="flex items-center gap-1.5 rounded-full bg-ink px-2.5 py-1 text-xs font-bold text-white"><span className="anim-live size-1.5 rounded-full bg-hot" />LIVE</span></h2>
+      <p className="text-sm text-muted">Every Platform API call this server makes and every webhook Nexconn sends it{mode === 'mock' ? ' (mock mode: no calls leave this machine)' : ''}.</p>
+      <div className="scroll-thin mt-3 h-72 overflow-y-auto rounded-2xl bg-ink p-3 font-mono text-[12px] leading-relaxed text-white/90">
+        {events.length === 0 && <div className="text-white/50">Waiting for activity…</div>}
+        {[...events].reverse().map((e, i) => (
+          <div key={`${e.t}-${i}`} className="flex gap-2 whitespace-nowrap">
+            <span className="text-white/45">{clock(e.t)}</span>
+            <span className={e.dir === 'api' ? 'text-[#7ee0b5]' : 'text-[#ffd36b]'}>{e.dir === 'api' ? '→ API    ' : '← WEBHOOK'}</span>
+            <span className="text-white">{e.what}</span>
+            {e.ms !== undefined && <span className="text-white/55">{e.ms} ms</span>}
+            {e.code !== undefined && <span className={String(e.code) === '0' || String(e.code) === '200' ? 'text-[#7ee0b5]' : 'text-[#ff9b85]'}>code {e.code}</span>}
+            {e.note && <span className="truncate text-white/55">{e.note}</span>}
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }

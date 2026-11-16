@@ -34,6 +34,12 @@ interface Transport {
 
 const listeners = { msg: new Set<MsgFn>(), meta: new Set<MetaFn>(), count: new Set<CountFn>(), status: new Set<StatusFn>(), msgMeta: new Set<MsgMetaFn>() };
 let linkUp = true; // the transport's own view of the connection (Nexconn connection status / mock stream)
+
+/** Opt-in trace of what the Nexconn SDK actually did (for demos and debugging): set `window.__ncTrace = []` before load. */
+function trace(kind: string, detail: Record<string, unknown> = {}) {
+  const log = (window as unknown as { __ncTrace?: unknown[] }).__ncTrace;
+  if (Array.isArray(log)) log.push({ t: Date.now(), kind, ...detail });
+}
 const emit = {
   msg: (m: RtMessage) => listeners.msg.forEach((f) => f(m)),
   meta: (c: string, ch: { key: string; value: string | null }[]) => listeners.meta.forEach((f) => f(c, ch)),
@@ -76,16 +82,20 @@ async function nexconnTransport(cfg: AppConfig): Promise<Transport> {
   };
 
   NCEngine.addConnectionStatusHandler('claimit', new ConnectionStatusHandler({
-    onConnectionStatusChanged({ status }) { emit.status(status === 0 || String(status).toLowerCase() === 'connected'); },
+    onConnectionStatusChanged({ status }) { trace('connectionStatus', { status }); emit.status(status === 0 || String(status).toLowerCase() === 'connected'); },
   }));
   NCEngine.addMessageHandler('claimit', new MessageHandler({
     onMessageMetadataUpdated({ messageId, channelIdentifier, metadata }) {
+      trace('onMessageMetadataUpdated', { messageId, status: (metadata as Record<string, string>)?.s });
       emit.msgMeta(messageId, channelIdentifier.channelId, metadata);
     },
     onMessageReceived({ messages }) {
       for (const m of messages) {
         const t = m.channelIdentifier.channelType;
-        if (t === ChannelType.OPEN || t === ChannelType.DIRECT) emit.msg(toRt(m));
+        if (t === ChannelType.OPEN || t === ChannelType.DIRECT) {
+          trace('onMessageReceived', { channel: t === ChannelType.OPEN ? 'open' : 'direct', type: m.messageType, sentTime: m.sentTime });
+          emit.msg(toRt(m));
+        }
       }
     },
   }));
@@ -96,15 +106,16 @@ async function nexconnTransport(cfg: AppConfig): Promise<Transport> {
         if (!by.has(c.channelId)) by.set(c.channelId, []);
         by.get(c.channelId)!.push({ key: c.key, value: c.operationType === 1 ? null : c.value });
       }
-      by.forEach((ch, id) => emit.meta(id, ch));
+      by.forEach((ch, id) => { trace('onMetadataChanged', { channelId: id, keys: ch.map((c) => c.key) }); emit.meta(id, ch); });
     },
-    onParticipantChanged({ channelId, participantCount }) { emit.count(channelId, participantCount); },
+    onParticipantChanged({ channelId, participantCount }) { trace('onParticipantChanged', { channelId, participantCount }); emit.count(channelId, participantCount); },
   }));
 
   return {
     async connect(token, userId) {
       me = userId;
       const res = await NCEngine.connect({ token });
+      trace('NCEngine.connect', { ok: res.isOk, code: res.code, userId });
       if (!res.isOk) throw new Error(`Nexconn connect failed (code ${res.code})`);
       emit.status(true);
     },
@@ -113,11 +124,13 @@ async function nexconnTransport(cfg: AppConfig): Promise<Transport> {
       const res = await ch.enterChannel({ messageCount: 20 });
       if (!res.isOk) throw new Error(`Could not join the live room (code ${res.code})`);
       const meta = await ch.getMetadata();
+      trace('OpenChannel.enterChannel', { channelId, participants: res.data?.participantCount, metadataKeys: Object.keys(meta.isOk ? meta.data || {} : {}).length });
       return { count: res.data?.participantCount ?? 1, metadata: meta.isOk ? meta.data || {} : {} };
     },
     async exitOpen(channelId) { await new OpenChannel(channelId).exitChannel(); },
     async sendOpen(channelId, type, content) {
       const res = await new OpenChannel(channelId).sendMessage(new SendMessageParams(content as Record<string, any>, type));
+      trace('OpenChannel.sendMessage', { type, ok: res.isOk, code: res.code });
       if (!res.isOk) throw new Error(linkUp && navigator.onLine ? 'NOT_SENT' : 'OFFLINE'); // refused by moderation (pre-message webhook or a native mute) vs. offline
       return res.data ? toRt(res.data) : null;
     },
@@ -126,6 +139,7 @@ async function nexconnTransport(cfg: AppConfig): Promise<Transport> {
       const res = type === MSG.TEXT
         ? await ch.sendMessage(new SendTextMessageParams({ text: (content as { text: string }).text }))
         : await ch.sendMessage(new SendMessageParams(content as Record<string, any>, type) as any);
+      trace('DirectChannel.sendMessage', { type, ok: res.isOk, code: res.code });
       if (!res.isOk) throw new Error(linkUp && navigator.onLine ? 'NOT_SENT' : 'OFFLINE'); // moderation refusal vs. no connection
       return res.data ? toRt(res.data) : null;
     },

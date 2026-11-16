@@ -4,7 +4,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { config } from './config.ts';
 import { db, now, rid, tx } from './db.ts';
 import { metaPublicKey } from './sign.ts';
-import { nexconn } from './nexconn.ts';
+import { activity, nexconn, recordActivity } from './nexconn.ts';
 import { mockbus } from './mockbus.ts';
 import { presence } from './presence.ts';
 import crypto from 'node:crypto';
@@ -1027,6 +1027,8 @@ app.post('/api/nexconn/webhook', express.json({ limit: '1mb' }), (req, res) => {
   if (db.prepare('SELECT 1 FROM webhook_nonces WHERE n = ?').get(nonce)) return res.status(401).json({ error: 'replayed' });
   db.prepare('INSERT INTO webhook_nonces (n, exp) VALUES (?, ?)').run(nonce, Date.now() + 5 * 60_000);
   const type = String(req.body?.type || '');
+  const d0 = (Array.isArray(req.body?.data) ? req.body.data[0] : null) || {};
+  recordActivity({ dir: 'webhook', what: type, note: [d0.userId, d0.channelId, d0.messageType, d0.key].filter(Boolean).join(' · ').slice(0, 80) });
   if (!seenWebhookTypes.has(type)) { seenWebhookTypes.add(type); console.log('[webhook] first', type, JSON.stringify(req.body).slice(0, 400)); }
   const data: any[] = Array.isArray(req.body?.data) ? req.body.data : [];
   if (type === 'user:connection_status') {
@@ -1093,6 +1095,13 @@ app.post('/api/admin/reports/resolve', h((req) => {
   const status = req.body.status === 'dismissed' ? 'dismissed' : 'upheld';
   db.prepare('UPDATE shop_reports SET status = ? WHERE seller_id = ? AND buyer_id = ?').run(status, str(req.body.sellerId, 20, 'shop'), str(req.body.buyerId, 20, 'buyer'));
   return { ok: true };
+}));
+
+/** Live feed of what the app and Nexconn are saying to each other (Platform API calls out, webhooks in). */
+app.get('/api/admin/nexconn', h((req) => {
+  admin(req);
+  const since = Number(req.query.since) || 0;
+  return { mode: config.mode, now: Date.now(), events: activity.filter((e) => e.t > since).slice(-200) };
 }));
 
 app.get('/api/admin/revenue', h((req) => {
