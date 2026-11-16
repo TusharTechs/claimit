@@ -126,6 +126,17 @@ if (cfg.mode === 'mock' && cfg.metaKey) {
     'drop state is versioned: the newer "ended" state outranks a replay of the older "live" one');
 }
 await call('POST', `/api/seller/drops/${live2.id}/end`, {}, sh);
+// Three attempts to post payment details in the room, and Nexconn's native mute takes over: the 4th message is refused.
+if (cfg.mode === 'mock') {
+  const scamDrop = (await call('POST', '/api/seller/drops', { title: 'Scam test' }, sh)).json;
+  const b9 = buyers[20]!;
+  const say = async (text: string) => (await call('POST', '/api/mock/send-open', { channelId: `drop_${scamDrop.id}`, type: 'CI:Chat', content: { text, name: 'x' } }, { 'x-mock-token': `mock:${b9.id}` })).json;
+  for (const t of ['pay me at scam@okaxis', 'or venmo.com/u/scammer', 'call +1 415 555 0199']) await say(t);
+  const fourth = await say('is this still available?');
+  check(fourth.blocked === true, 'after 3 payment-detail attempts the buyer is muted in that room (native mute)');
+  await call('POST', `/api/seller/drops/${scamDrop.id}/end`, {}, sh);
+}
+
 // The public drop response keeps every field the room relies on (a stray comment once dropped these silently).
 const demo = (await call('GET', '/api/drops/demo')).json;
 check(demo.demo === true && typeof demo.currency === 'string' && !!demo.trust && typeof demo.drop?.v === 'number', 'public drop response includes demo flag, currency, trust and a versioned drop state');

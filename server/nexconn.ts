@@ -129,7 +129,7 @@ export const nexconn = {
 
   /** Mute someone in one room (Nexconn native moderation): their messages are refused by Nexconn itself. */
   async muteParticipant(channelId: string, userId: string, minutes: number) {
-    if (mock) return;
+    if (mock) return mockbus.mute(channelId, userId, minutes);
     await call('/v4/open-channel/participant/mute-list/add', { channelId, participantIds: [userId], durationMinutes: Math.min(minutes, 43_200) });
   },
 

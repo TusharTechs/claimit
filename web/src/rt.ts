@@ -117,7 +117,8 @@ async function nexconnTransport(cfg: AppConfig): Promise<Transport> {
     async exitOpen(channelId) { await new OpenChannel(channelId).exitChannel(); },
     async sendOpen(channelId, type, content) {
       const res = await new OpenChannel(channelId).sendMessage(new SendMessageParams(content as Record<string, any>, type));
-      return res.isOk && res.data ? toRt(res.data) : null;
+      if (!res.isOk) throw new Error('NOT_SENT'); // refused by moderation (pre-message webhook or a native mute)
+      return res.data ? toRt(res.data) : null;
     },
     async sendDirect(peerId, type, content) {
       const ch = new DirectChannel(peerId);
@@ -173,7 +174,8 @@ function mockTransport(): Transport {
     },
     async exitOpen(channelId) { await post('/api/mock/exit', { channelId }); },
     async sendOpen(channelId, type, content) {
-      await post('/api/mock/send-open', { channelId, type, content });
+      const r = await post('/api/mock/send-open', { channelId, type, content }) as { blocked?: boolean };
+      if (r?.blocked) throw new Error('NOT_SENT');
       return null; // mock echoes to sender through the stream
     },
     async sendDirect(peerId, type, content) {
@@ -203,7 +205,10 @@ const ready = () => readyPromise;
 
 export const rt = {
   config(): Promise<AppConfig> {
-    cfgPromise ??= fetch('/api/config').then((r) => r.json());
+    cfgPromise ??= fetch('/api/config').then((r) => {
+      if (!r.ok) throw new Error(`config ${r.status}`);
+      return r.json() as Promise<AppConfig>;
+    }).catch((e) => { cfgPromise = null; throw e; }); // retry on the next call
     return cfgPromise;
   },
   connect(token: string, userId: string): Promise<void> {

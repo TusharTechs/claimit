@@ -31,7 +31,7 @@ export default function SellerConsole() {
   useEffect(() => {
     const el = document.getElementById('seller-panel');
     if (!el || !('IntersectionObserver' in window)) return;
-    const io = new IntersectionObserver(([e]) => setMobileSection(e.isIntersecting ? 'panel' : 'items'), { threshold: 0.25 });
+    const io = new IntersectionObserver(([e]) => setMobileSection(e.isIntersecting ? 'panel' : 'items'), { threshold: 0.05, rootMargin: '0px 0px -30% 0px' });
     io.observe(el);
     return () => io.disconnect();
   }, [data?.drop.id]);
@@ -190,6 +190,13 @@ export default function SellerConsole() {
           className="sticky top-[64px] z-20 flex w-full items-center justify-center gap-2 bg-mint px-4 py-2.5 text-sm font-bold text-white lg:hidden">
           💸 {needsAction} payment{needsAction > 1 ? 's' : ''} to confirm →
         </button>
+      )}
+      {drop.startsAt && drop.startsAt > Date.now() && !ended && (
+        <div className="mx-auto mt-3 max-w-6xl px-4">
+          <div className="rounded-2xl bg-sun-soft px-4 py-2.5 text-sm text-[#6b4600]">
+            📅 <b>Scheduled for {new Date(drop.startsAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}.</b> Buyers see a countdown and can add it to their calendar. Dropping an item starts it early.
+          </div>
+        </div>
       )}
       <main className="mx-auto grid max-w-6xl gap-5 px-4 pt-5 lg:grid-cols-[1fr_400px] lg:pb-28">
         <div className="space-y-5">

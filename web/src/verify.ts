@@ -38,11 +38,12 @@ const newest = new Map<string, number>(); // claimId -> time of the newest verif
  * older than a status already seen for this claim — so a buyer can't roll "shipped" back to an earlier, also-signed state.
  */
 export async function verifyOrderStatus(claimId: string, status: string | undefined, t: string | undefined, sig: string | undefined): Promise<boolean> {
-  if (!claimId || !status || !sig || !t) return false;
-  const ck = `${claimId}|${status}|${t}|${sig}`;
-  if (!statusCache.has(ck)) statusCache.set(ck, verify(`order|${claimId}|${status}|${t}`, sig));
+  if (!claimId || !status || !sig) return false;
+  const ck = `${claimId}|${status}|${t ?? ''}|${sig}`;
+  // Legacy cards (signed without a time) verify against the old format and count as the oldest possible status.
+  if (!statusCache.has(ck)) statusCache.set(ck, verify(t ? `order|${claimId}|${status}|${t}` : `order|${claimId}|${status}`, sig));
   if (!(await statusCache.get(ck))) { statusCache.delete(ck); return false; } // don't pin a failure (e.g. key not loaded yet)
-  const time = Number(t);
+  const time = Number(t ?? 0);
   if (time < (newest.get(claimId) ?? 0)) return false;
   newest.set(claimId, time);
   return true;

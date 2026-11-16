@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
+import { toast } from 'sonner';
 import { Check, ChevronRight, Lock, MessageCircle, Share2, ShieldCheck, ShoppingBag, Truck, WifiOff } from 'lucide-react';
 import { api, ApiError, sessions, type BuyerSession, type Shipping } from '../api';
 import { rt, type RtMessage } from '../rt';
@@ -82,7 +83,7 @@ export default function Room() {
         for (const [k, v] of Object.entries(d.state)) if (!next[k] || next[k].v <= v.v) next[k] = v;
         return next;
       });
-      setDropState((cur) => (cur && cur.status === 'ended' ? cur : d.drop));
+      setDropState((cur) => (cur && (cur.status === 'ended' || (cur.v ?? 0) > (d.drop.v ?? 0)) ? cur : d.drop));
     } catch (e) {
       setError(e instanceof ApiError && e.status === 404 ? 'This drop link is not valid.' : 'Could not load the drop. Check your connection.');
     }
@@ -293,6 +294,7 @@ export default function Room() {
   if (!drop) return <RoomSkeleton />;
 
   const embed = embedUrl(drop.liveUrl);
+  const scheduled = !current && !!drop.startsAt && drop.startsAt > Date.now();
   const curState = current ? state[current.id] : undefined;
   // Only this round's claim: the demo (and closed-then-redropped items) can bring an item back after you already bought it.
   const myClaim = current ? claims.find((c) => c.itemId === current.id && ['holding', 'paying', 'waiting', 'paid'].includes(c.status)
@@ -314,6 +316,9 @@ export default function Room() {
                 : <>New shop · since {new Date(drop.trust.since).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</>}
             </div>
           )}
+          {drop.trust && !drop.demo && drop.trust.reportsUnderReview > 0 && drop.trust.reports < 1 && (
+            <div className="mt-0.5 text-[11px] text-muted">{drop.trust.reportsUnderReview} buyer report{drop.trust.reportsUnderReview === 1 ? '' : 's'} under review</div>
+          )}
           {drop.trust && !drop.demo && (drop.trust.reports >= 1 || drop.trust.rejectedPct >= 20) && (
             <div className="mt-0.5 text-[11px] font-bold text-hot-dark">
               ⚠ {[drop.trust.reports >= 1 && `${drop.trust.reports} upheld buyer report${drop.trust.reports === 1 ? '' : 's'}`, drop.trust.rejectedPct >= 20 && `${drop.trust.rejectedPct}% of payments not confirmed`].filter(Boolean).join(' · ')}
@@ -324,8 +329,8 @@ export default function Room() {
           <span className="rounded-full bg-line px-2.5 py-1 text-xs font-bold text-ink-2">ENDED</span>
         ) : (
           <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-2.5 py-1 text-xs font-bold text-white">
-            <span className={`size-1.5 rounded-full ${connected && online ? 'anim-live bg-hot' : 'bg-white/40'}`} />
-            {!current && drop.startsAt && drop.startsAt > Date.now() ? 'SOON' : 'LIVE'}{viewers && viewers >= 3 ? ` · ${viewers} watching` : ''}
+            <span className={`size-1.5 rounded-full ${scheduled ? 'bg-sun' : connected && online ? 'anim-live bg-hot' : 'bg-white/40'}`} />
+            {scheduled ? 'SOON' : 'LIVE'}{viewers && viewers >= 3 ? ` · ${viewers} watching` : ''}
           </span>
         )}
         <button onClick={share} className="grid size-10 shrink-0 place-items-center rounded-full bg-white shadow-sm" aria-label="Share this drop">
@@ -368,7 +373,7 @@ export default function Room() {
               isLatest={current.id === latestId && !ended} holdSeconds={drop.holdSeconds} />
           ) : ended ? null : (
             <div className="grid aspect-[4/3] place-items-center rounded-[26px] border-2 border-dashed border-line bg-card px-6 text-center">
-              {drop.startsAt && drop.startsAt > Date.now() ? <Scheduled drop={drop} /> : (
+              {drop.startsAt && drop.startsAt > Date.now() - 10 * 60_000 ? <Scheduled drop={drop} /> : (
               <div>
                 <LogoMark className="mx-auto size-12" />
                 <div className="mt-3 font-display text-2xl font-bold">The drop starts soon</div>
@@ -664,7 +669,11 @@ function Feed({ feed, people, meId, sellerId }: { feed: FeedEntry[]; people: Peo
 function ChatInput({ onSend, disabled, ended }: { onSend: (t: string) => Promise<void>; disabled: boolean; ended?: boolean }) {
   const [text, setText] = useState('');
   return (
-    <form className="flex gap-2" onSubmit={async (e) => { e.preventDefault(); const t = text.trim(); if (!t) return; setText(''); await onSend(t).catch(() => {}); }}>
+    <form className="flex gap-2" onSubmit={async (e) => { e.preventDefault(); const t = text.trim(); if (!t) return; setText(''); await onSend(t).catch(() => {
+      // Moderation refused it: repeated payment details pause your chat in this room (Nexconn native mute).
+      toast("Your message wasn't sent. Sharing payment details or phone numbers in the room pauses your chat here for a while.", { duration: 6000 });
+      setText(t);
+    }); }}>
       <label className="sr-only" htmlFor="room-chat">Message the room</label>
       <input id="room-chat" className="input !rounded-full !py-2.5" placeholder={ended ? 'This drop has ended' : disabled ? 'Connecting…' : 'Ask about size, colour…'} value={text} onChange={(e) => setText(e.target.value)} maxLength={200} disabled={disabled} />
       <button className="btn size-11 shrink-0 bg-ink text-white" disabled={disabled || !text.trim()} aria-label="Send">
@@ -965,6 +974,22 @@ function OrderCard({ c, buyerName, onChange, toast }: { c: MyClaim; buyerName: s
 /** A drop the shop scheduled ahead (Pro): live countdown plus a calendar invite (.ics), so buyers come back on time. */
 function Scheduled({ drop }: { drop: PublicDrop }) {
   const left = useCountdown(drop.startsAt);
+  const [following, setFollowing] = useState(false);
+  const gcal = () => {
+    const t = (ms: number) => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    const q = new URLSearchParams({ action: 'TEMPLATE', text: `${drop.shop} live drop: ${drop.title}`, dates: `${t(drop.startsAt!)}/${t(drop.startsAt! + 3_600_000)}`,
+      details: `First tap wins. Open ${location.href.split('?')[0]}` });
+    return `https://calendar.google.com/calendar/render?${q.toString()}`;
+  };
+  if (left <= 0) {
+    return (
+      <div>
+        <div className="text-xs font-bold uppercase tracking-wider text-hot-dark">Starting now</div>
+        <div className="mt-1 font-display text-2xl font-bold">{drop.shop} is about to drop the first item</div>
+        <p className="mt-1 text-muted">Stay on this page. Items appear the moment they're dropped 🔔</p>
+      </div>
+    );
+  }
   const d = Math.floor(left / 86_400_000), h = Math.floor(left / 3_600_000) % 24, m = Math.floor(left / 60_000) % 60, sec = Math.floor(left / 1000) % 60;
   const ics = () => {
     const t = (ms: number) => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
@@ -983,7 +1008,13 @@ function Scheduled({ drop }: { drop: PublicDrop }) {
       <div className="text-xs font-bold uppercase tracking-wider text-hot-dark">Scheduled drop</div>
       <div className="mt-1 font-display text-4xl font-extrabold tabular-nums" role="timer">{d > 0 ? `${d}d ` : ''}{String(h).padStart(2, '0')}:{String(m).padStart(2, '0')}:{String(sec).padStart(2, '0')}</div>
       <p className="mt-1 text-muted">{new Date(drop.startsAt!).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })} · keep this page open or add a reminder</p>
-      <button className="btn mt-3 bg-ink px-5 py-2.5 text-white" onClick={ics}>Add to calendar</button>
+      <div className="mt-3 flex flex-wrap justify-center gap-2">
+        <a className="btn bg-ink px-4 py-2.5 text-sm text-white" href={gcal()} target="_blank" rel="noreferrer">Google Calendar</a>
+        <button className="btn bg-white px-4 py-2.5 text-sm shadow-sm" onClick={ics}>Apple / Outlook (.ics)</button>
+        <button className="btn bg-white px-4 py-2.5 text-sm shadow-sm" disabled={following} onClick={async () => {
+          try { await ensureBuyer(); await api.follow(shopIdOf(drop.sellerId), true); setFollowing(true); } catch { /* ignore */ }
+        }}>{following ? 'Following ✓' : `Follow ${drop.shop}`}</button>
+      </div>
     </div>
   );
 }

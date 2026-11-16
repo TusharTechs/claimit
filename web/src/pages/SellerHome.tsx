@@ -355,7 +355,7 @@ function InviteCard({ sellerId, shop }: { sellerId: string; shop: string }) {
     <section className="mt-4 flex flex-col gap-3 rounded-[26px] border border-line bg-card p-5 shadow-[var(--shadow-card)] sm:flex-row sm:items-center">
       <div className="flex-1">
         <div className="font-display text-lg font-bold">Know another live seller?</div>
-        <p className="text-sm text-muted">They get a 30-day Pro trial. When they finish their first drop with a sale, {shop} gets a month of Pro free.</p>
+        <p className="text-sm text-muted">They get a 30-day Pro trial. Once they have 3 independent paying customers, {shop} gets a month of Pro free.</p>
       </div>
       <div className="flex shrink-0 gap-2">
         <CopyButton text={link} label="Copy invite link" className="!py-2" />

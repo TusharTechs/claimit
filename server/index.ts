@@ -10,7 +10,7 @@ import { presence } from './presence.ts';
 import crypto from 'node:crypto';
 import { CURRENCIES, MSG } from '../shared/types.ts';
 import {
-  AppError, SYSTEM_USER, republishLive, sellerTrust, buyerMarkPaid, markShipped, claim, closeItem, dropItem, endDrop, logEvent, myClaims, publicDrop,
+  AppError, SYSTEM_USER, republishLive, sweepEndedMetadata, sellerTrust, buyerMarkPaid, markShipped, claim, closeItem, dropItem, endDrop, logEvent, myClaims, publicDrop,
   q, release, sellerConfirm, sellerUserId, startExpiryLoop, toItem,
 } from './engine.ts';
 import type { AppConfig } from '../shared/types.ts';
@@ -57,8 +57,8 @@ const str = (v: unknown, max: number, field: string, required = true) => {
 // ---------- auth helpers ----------
 
 type SellerAuth = { id: string; name: string; shop: string; upi: string; currency: string; pay_link: string | null; pay_note: string | null;
-  pro_until: number | null; trial_used: number; founding: number; ref_by: string | null; role: 'owner' | 'cohost'; cohostName: string | null; cohostId: string | null };
-const SELLER_COLS = 'id, name, shop, upi, currency, pay_link, pay_note, pro_until, trial_used, founding, ref_by';
+  pro_until: number | null; trial_used: number; founding: number; ref_by: string | null; created: number; role: 'owner' | 'cohost'; cohostName: string | null; cohostId: string | null };
+const SELLER_COLS = 'id, name, shop, upi, currency, pay_link, pay_note, pro_until, trial_used, founding, ref_by, created';
 
 /** The shop's owner (seller key) or one of its co-hosts (own key, Pro). Never returns the owner's key. */
 function seller(req: Request): SellerAuth {
@@ -75,6 +75,9 @@ function seller(req: Request): SellerAuth {
   throw new AppError(401, 'NO_AUTH', 'Seller session not found');
 }
 const isPro = (s: { pro_until: number | null }) => !!s.pro_until && s.pro_until > now();
+/** Founding sellers (first 100 shops) pay half for their first year; after that, the standard price. */
+const foundingActive = (s: { founding: number; created: number }) => !!s.founding && now() < s.created + 365 * 86_400_000;
+const proPriceFor = (s: { founding: number; created: number }) => (foundingActive(s) ? 4.5 : 9);
 const cohostUserId = (cohostId: string) => `c_${cohostId}`;
 /** A co-host chat identity is only valid while that co-host is on the team and the shop is on Pro. */
 function activeCohost(userId: string) {
@@ -164,8 +167,8 @@ app.post('/api/seller/session', h(async (req) => {
   // on the team and the shop is still Pro), so removing a co-host or a lapsed plan cuts them off everywhere at once.
   const userId = s.cohostId ? cohostUserId(s.cohostId) : sellerUserId(s.id);
   return { id: s.id, name: s.name, shop: s.shop, upi: s.upi, currency: s.currency, payLink: s.pay_link, payNote: s.pay_note,
-    role: s.role, cohostName: s.cohostName, pro: isPro(s), proUntil: s.pro_until, trialUsed: !!s.trial_used, founding: !!s.founding,
-    proPrice: s.founding ? 4.5 : 9, // founding sellers: 50% off for their first year of Pro
+    role: s.role, cohostName: s.cohostName, pro: isPro(s), proUntil: s.pro_until, trialUsed: !!s.trial_used, founding: foundingActive(s),
+    proPrice: proPriceFor(s), // founding sellers: 50% off for their first year of Pro
     paidPro: !!db.prepare(`SELECT 1 FROM pro_payments WHERE seller_id = ? AND status = 'confirmed'`).get(s.id),
     referred: !!s.ref_by, referrals: (db.prepare('SELECT COUNT(*) AS n FROM sellers WHERE ref_by = ?').get(s.id) as { n: number }).n,
     userId, token: await nexconn.token(userId, s.cohostName ? `${s.cohostName} (${s.shop} team)` : s.shop) };
@@ -203,7 +206,7 @@ const dodo = () => ({
 });
 function dodoCheckout(req: Request, s: SellerAuth) {
   const d = dodo();
-  const base = (s.founding && d.foundingLink) || d.link;
+  const base = (foundingActive(s) && d.foundingLink) || d.link;
   if (!base || !d.secret) return null;
   const site = config.publicUrl || `${req.protocol}://${req.get('host')}`;
   const u = new URL(base);
@@ -220,7 +223,7 @@ app.get('/api/seller/pro/billing', h((req) => {
   const checkout = dodoCheckout(req, s);
   const pending = db.prepare(`SELECT id, amount, ref, created FROM pro_payments WHERE seller_id = ? AND status = 'pending' ORDER BY created DESC LIMIT 1`).get(s.id) ?? null;
   return { available: !!(checkout || b.link || b.note), checkout, testMode: !!checkout && dodo().test, link: b.link, note: b.note,
-    price: s.founding ? 4.5 : 9, pending, proUntil: s.pro_until };
+    price: proPriceFor(s), pending, proUntil: s.pro_until };
 }));
 
 /** Dodo webhook (Standard Webhooks signing): verify, then add 30 days of Pro for the shop in the payment's metadata. */
@@ -261,7 +264,7 @@ app.post('/api/seller/pro/pay', limit('propay', 10, 60 * 60_000), h((req) => {
   if (ref.length < 4) throw new AppError(400, 'BAD_REF', 'Add the transaction ID or the name you paid from');
   if (db.prepare(`SELECT 1 FROM pro_payments WHERE seller_id = ? AND status = 'pending'`).get(s.id)) throw new AppError(409, 'PENDING', 'We are already confirming a payment from you');
   const id = rid(10);
-  db.prepare('INSERT INTO pro_payments (id, seller_id, amount, ref, created) VALUES (?, ?, ?, ?, ?)').run(id, s.id, s.founding ? 4.5 : 9, ref, now());
+  db.prepare('INSERT INTO pro_payments (id, seller_id, amount, ref, created) VALUES (?, ?, ?, ?, ?)').run(id, s.id, proPriceFor(s), ref, now());
   return { id, status: 'pending' };
 }));
 
@@ -286,7 +289,8 @@ app.post('/api/seller/cohosts', limit('cohost', 20, 60 * 60_000), h((req) => {
 
 app.delete('/api/seller/cohosts/:id', h((req) => {
   const s = ownerOnly(req);
-  db.prepare('DELETE FROM cohosts WHERE id = ? AND seller_id = ?').run(String(req.params.id), s.id);
+  const removed = db.prepare('DELETE FROM cohosts WHERE id = ? AND seller_id = ?').run(String(req.params.id), s.id).changes;
+  if (!removed) throw new AppError(404, 'NO_COHOST', 'Co-host not found');
   // Cut the co-host off at Nexconn too: expire their tokens and remove them from this shop's live rooms for a day.
   const uid = cohostUserId(String(req.params.id));
   db.prepare('DELETE FROM tokens WHERE user_id = ?').run(uid);
@@ -440,7 +444,7 @@ app.get('/api/seller/insights', h((req) => {
     coversPro: false,
   };
   // "Fair drops paid for Pro this month": only when the rescued sales, in USD, reach the $9 Pro price.
-  base.coversPro = base.rescuedThisMonth * (USD_RATE[s.currency] ?? 0) >= (s.founding ? 4.5 : 9); // their own Pro price
+  base.coversPro = base.rescuedThisMonth * (USD_RATE[s.currency] ?? 0) >= proPriceFor(s); // their own Pro price
   if (!base.pro) return base;
   // Of all holds that ended in "paid" or "never paid", the share that never paid.
   const winners = one(`SELECT COUNT(*) FROM claims c JOIN drops d ON d.id = c.drop_id WHERE ${REAL} AND c.status IN ('paid','expired')`, s.id);
@@ -540,10 +544,13 @@ function rewardReferrer(sellerId: string) {
   // and none of those phones ever bought from the inviting shop. The shop also must have no open or upheld reports.
   const cur = (db.prepare('SELECT currency FROM sellers WHERE id = ?').get(sellerId) as { currency: string }).currency;
   const minPrice = 5 / (USD_RATE[cur] || 1);
+  // Each qualifying order also carries the buyer's own payment reference and was paid 14+ days ago: a dispute window in
+  // which buyers can still report the shop before the inviter is rewarded.
   const independent = (db.prepare(`SELECT COUNT(DISTINCT c.ship_phone) AS n FROM claims c JOIN drops d ON d.id = c.drop_id JOIN items i ON i.id = c.item_id
     WHERE d.seller_id = ? AND d.practice = 0 AND c.status = 'paid' AND i.price >= ? AND COALESCE(c.ship_phone, '') != ''
+      AND COALESCE(c.utr, '') != '' AND c.paid_at < ?
       AND NOT EXISTS (SELECT 1 FROM claims c2 JOIN drops d2 ON d2.id = c2.drop_id WHERE d2.seller_id = ? AND c2.ship_phone = c.ship_phone)`)
-    .get(sellerId, minPrice, s.ref_by) as { n: number }).n;
+    .get(sellerId, minPrice, now() - 14 * 86_400_000, s.ref_by) as { n: number }).n;
   const disputed = (db.prepare(`SELECT COUNT(*) AS n FROM shop_reports WHERE seller_id = ? AND status != 'dismissed'`).get(sellerId) as { n: number }).n;
   if (independent < 3 || disputed > 0) return;
   tx(() => {
@@ -987,6 +994,7 @@ if (config.mode === 'mock') {
     // Same moderation path as Nexconn's pre-message webhook.
     const channelId = str(req.body.channelId, 64, 'channelId');
     const type = str(req.body.type, 32, 'type');
+    if (mockbus.isMuted(channelId, mockUser(req))) return { blocked: true, reason: 'muted' }; // Nexconn refuses muted users before any webhook
     const verdict = moderateRoomChat(mockUser(req), channelId, type, JSON.stringify(req.body.content ?? {})) as { pass: number; replaceContent?: string };
     if (!verdict.pass) return { blocked: true };
     const content = verdict.replaceContent ? JSON.parse(verdict.replaceContent) : req.body.content;
@@ -1048,7 +1056,11 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 startExpiryLoop();
-setTimeout(() => console.log(`[boot] republished ${republishLive()} live drop(s)`), 1500);
+// Referral rewards mature after the dispute window, so check invited shops every hour (not only when a drop ends).
+setInterval(() => {
+  for (const { id } of db.prepare(`SELECT id FROM sellers WHERE ref_by IS NOT NULL AND ref_rewarded = 0`).all() as { id: string }[]) rewardReferrer(id);
+}, 3600_000).unref?.();
+setTimeout(() => console.log(`[boot] republished ${republishLive()} live drop(s), cleared metadata of ${sweepEndedMetadata()} ended drop(s)`), 1500);
 import('./demo.ts').then((m) => m.startDemo()).catch((e) => console.error('[demo] failed to start', e));
 app.listen(config.port, () => {
   console.log(`ClaimIt server on http://localhost:${config.port} (mode: ${config.mode}${config.mode === 'nexconn' ? `, area ${config.nexconn.area}` : ''})`);

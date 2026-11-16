@@ -30,6 +30,8 @@ function push(userId: string, payload: unknown) {
   for (const res of set) res.write(data);
 }
 
+const muted = new Map<string, number>();
+
 export const mockbus = {
   attach(userId: string, res: Response) {
     res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
@@ -90,6 +92,10 @@ export const mockbus = {
     const changes = Object.entries(entries).map(([key, value]) => ({ key, value }));
     for (const uid of openMembers.get(channelId) || []) push(uid, { type: 'metadata', channelId, changes });
   },
+
+  /** Mirrors Nexconn's native open-channel mute: muted users' room messages are refused until the time runs out. */
+  mute(channelId: string, userId: string, minutes: number) { muted.set(`${channelId}|${userId}`, Date.now() + minutes * 60_000); },
+  isMuted(channelId: string, userId: string) { return (muted.get(`${channelId}|${userId}`) ?? 0) > Date.now(); },
 
   removeMetadata(channelId: string, keys: string[]) {
     const cur = metadata.get(channelId) || {};

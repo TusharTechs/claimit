@@ -434,11 +434,24 @@ export function endDrop(dropId: string) {
   publish(dropId, [], { drop: JSON.stringify(dropState) });
   roomEvent(dropId, { kind: 'ended', text: 'This drop has ended. Thanks for shopping!' });
   // Ten minutes later, free the item keys (a channel holds at most 100); late visitors read the final state over REST.
-  const d = q.drop(dropId)!;
-  setTimeout(() => {
-    const keys = q.items(dropId).map((i) => itemKey(i.id));
-    enqueue(d.channel_id, () => nexconn.removeMetadata(d.channel_id, sellerUserId(d.seller_id), keys));
-  }, 10 * 60_000).unref?.();
+  setTimeout(() => clearEndedMetadata(dropId), 10 * 60_000).unref?.();
+}
+
+function clearEndedMetadata(dropId: string) {
+  const d = q.drop(dropId);
+  if (!d || d.status !== 'ended') return;
+  const keys = q.items(dropId).map((i) => itemKey(i.id));
+  enqueue(d.channel_id, async () => {
+    await nexconn.removeMetadata(d.channel_id, sellerUserId(d.seller_id), keys);
+    db.prepare('UPDATE drops SET meta_cleared = 1 WHERE id = ?').run(dropId);
+  });
+}
+
+/** Boot: finish any cleanup a restart interrupted (drops ended 10+ minutes ago whose keys were never removed). */
+export function sweepEndedMetadata() {
+  const ids = db.prepare(`SELECT id FROM drops WHERE status = 'ended' AND meta_cleared = 0 AND ended < ?`).all(now() - 10 * 60_000) as { id: string }[];
+  for (const { id } of ids) clearEndedMetadata(id);
+  return ids.length;
 }
 
 /** An order card whose send threw is sent again once (5s later), so a winner is never left without checkout. A send that
