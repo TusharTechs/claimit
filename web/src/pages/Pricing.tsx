@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Check, Sparkles } from 'lucide-react';
-import { api, sessions } from '../api';
+import { api, sessions, type SellerAccount } from '../api';
 import { Logo, Spinner, celebrate, useToasts } from '../components/ui';
 
 const FREE = [
@@ -14,9 +14,9 @@ const FREE = [
 const PRO: [string, boolean][] = [
   ['Everything in Free', true],
   ['Co-hosts: up to 5 helpers confirm payments and drop items from their own phone while you present', true],
+  ['Lifetime analytics: no-show rate, repeat buyers, time to pay, best hour to drop', true],
   ['Priority support on WhatsApp', true],
   ['Auto-confirm payments via Stripe, PayPal & UPI gateways — no manual checks', false],
-  ['Advanced analytics: conversion, repeat buyers, best drop times', false],
   ['Custom shop link and your logo on the drop page', false],
 ];
 
@@ -80,15 +80,24 @@ export default function Pricing() {
 function ProCta() {
   const nav = useNavigate();
   const [busy, setBusy] = useState(false);
+  const [acct, setAcct] = useState<SellerAccount | null>(null);
   const toasts = useToasts();
-  if (!sessions.seller()) {
+  const loggedIn = !!sessions.seller();
+  useEffect(() => { if (loggedIn) api.sellerSession().then(setAcct).catch(() => {}); }, [loggedIn]);
+  if (!loggedIn) {
     return <Link to="/sell" className="btn mt-7 w-full bg-sun py-3.5 text-ink">Create a shop, then try Pro free for 14 days</Link>;
   }
+  if (!acct) return <div className="btn mt-7 w-full bg-white/10 py-3.5 text-white/70"><Spinner /></div>;
+  if (acct.role === 'cohost') return <div className="mt-7 rounded-2xl bg-white/10 p-3.5 text-center text-sm font-semibold">You're a co-host. The shop owner manages the plan.</div>;
+  if (acct.pro) {
+    return <Link to="/sell" className="btn mt-7 w-full bg-white py-3.5 text-ink">You're on Pro{acct.proUntil ? ` until ${new Date(acct.proUntil).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : ''} · See your team</Link>;
+  }
+  if (acct.trialUsed) return <div className="mt-7 rounded-2xl bg-white/10 p-3.5 text-center text-sm font-semibold">Your free trial has ended. Your shop is on Free, and nothing was lost. Paid Pro opens soon: leave your contact below.</div>;
   return (
     <button className="btn mt-7 w-full bg-sun py-3.5 text-ink" disabled={busy} onClick={async () => {
       setBusy(true);
       try { await api.proTrial(); celebrate({ x: 0.75, y: 0.6 }); toasts.push('Pro trial started: 14 days free', 'mint'); nav('/sell'); }
       catch (e) { toasts.push(e instanceof Error ? e.message : 'Could not start the trial', 'hot'); } finally { setBusy(false); }
-    }}>{busy ? <Spinner /> : 'Start 14-day free trial'}</button>
+    }}>{busy ? <Spinner /> : 'Start 14-day free trial — no card needed'}</button>
   );
 }

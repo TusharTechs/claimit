@@ -55,7 +55,13 @@ async function ensureDemo() {
 
 /** Put the next demo item up and let the bots race for it. */
 async function nextRound() {
+  // A real visitor grabbed the current item during the "next item in…" countdown: let them finish, try again shortly.
+  if (current) {
+    const holding = q.activeClaims(current).find((c) => (c.status === 'holding' || c.status === 'paying') && !isBot(c.buyer_id));
+    if (holding) { pendingNext = true; later(5000, () => { pendingNext = false; nextRound().catch(() => {}); }); return; }
+  }
   timers.forEach(clearTimeout); timers = [];
+  confirming.clear(); // their timers were just cleared; tick() re-schedules any payment still waiting for confirmation
   const items = db.prepare('SELECT id FROM items WHERE drop_id = ? ORDER BY idx').all(DEMO_DROP) as { id: string }[];
   const idx = current ? (items.findIndex((i) => i.id === current) + 1) % items.length : 0;
   const itemId = items[idx].id;

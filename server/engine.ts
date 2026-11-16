@@ -70,7 +70,9 @@ export function sellerTrust(sellerId: string): SellerTrust {
   const r = db.prepare(`SELECT COUNT(*) AS n, AVG(c.paid_at - c.paying_at) AS avg FROM claims c JOIN drops d ON d.id = c.drop_id
     WHERE d.seller_id = ? AND d.practice = 0 AND c.status = 'paid' AND c.buyer_id NOT LIKE 'bot\\_%' ESCAPE '\\'`).get(sellerId) as { n: number; avg: number | null };
   const since = (db.prepare('SELECT created FROM sellers WHERE id = ?').get(sellerId) as { created: number } | undefined)?.created ?? now();
-  return { orders: r.n, since, avgConfirmSec: r.avg ? Math.round(r.avg / 1000) : null };
+  const rej = (db.prepare(`SELECT COUNT(*) AS n FROM claims c JOIN drops d ON d.id = c.drop_id WHERE d.seller_id = ? AND d.practice = 0 AND c.status = 'rejected' AND c.paying_at IS NOT NULL`).get(sellerId) as { n: number }).n;
+  const reports = (db.prepare('SELECT COUNT(*) AS n FROM shop_reports WHERE seller_id = ?').get(sellerId) as { n: number }).n;
+  return { orders: r.n, since, avgConfirmSec: r.avg ? Math.round(r.avg / 1000) : null, rejectedPct: r.n + rej ? Math.round((rej / (r.n + rej)) * 100) : 0, reports };
 }
 
 export function publicDrop(dropId: string): PublicDrop {

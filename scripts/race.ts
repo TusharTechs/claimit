@@ -72,7 +72,26 @@ const closeSold = await call('POST', `/api/seller/drops/${drop.id}/items/${item.
 const redrop = await call('POST', `/api/seller/drops/${drop.id}/items/${item.id}/drop`, {}, sh);
 check(closeSold.status === 409 && redrop.status === 409, 'a sold item can be neither closed nor dropped again');
 
+// Confirm vs. reject at the same instant: exactly one decision wins, the other is refused.
+const item3 = (await call('POST', `/api/seller/drops/${drop.id}/items`, { name: 'Contested scarf', price: 12 }, sh)).json;
+await call('POST', `/api/seller/drops/${drop.id}/items/${item3.id}/drop`, {}, sh);
+const b3 = buyers[10]!; const bh3 = { 'x-buyer-id': b3.id, 'x-buyer-key': b3.key };
+const c3 = (await call('POST', `/api/drops/${drop.id}/items/${item3.id}/claim`, {}, bh3)).json;
+await call('POST', `/api/claims/${c3.id}/paid`, { utr: '', phone: '+14155550123', address: '1 Test Street, Testville', pincode: '94103' }, bh3);
+const [conf, rej] = await Promise.all([
+  call('POST', `/api/seller/claims/${c3.id}/confirm`, {}, sh), call('POST', `/api/seller/claims/${c3.id}/reject`, {}, sh)]);
+check([conf.status, rej.status].filter((x) => x === 200).length === 1, `confirm and reject racing: exactly one wins (${conf.status}/${rej.status})`);
+
+// Run again never copies an item someone is still holding in the old drop (no selling one piece twice).
+const item4 = (await call('POST', `/api/seller/drops/${drop.id}/items`, { name: 'Held jacket', price: 30 }, sh)).json;
+await call('POST', `/api/seller/drops/${drop.id}/items/${item4.id}/drop`, {}, sh);
+const b4 = buyers[11]!;
+await call('POST', `/api/drops/${drop.id}/items/${item4.id}/claim`, {}, { 'x-buyer-id': b4.id, 'x-buyer-key': b4.key });
 await call('POST', `/api/seller/drops/${drop.id}/end`, {}, sh);
+const again = (await call('POST', `/api/seller/drops/${drop.id}/again`, {}, sh)).json;
+const againItems = (await call('GET', `/api/seller/drops/${again.id}`, undefined, sh)).json.items as Json[];
+check(!againItems.some((i) => i.name === 'Held jacket') && again.skippedHeld >= 1, 'Run again skips the item still on hold in the old drop');
+await call('POST', `/api/seller/drops/${again.id}/end`, {}, sh);
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nAll checks passed: no double-claims under contention.');
 process.exit(failed ? 1 : 0);
 export {};

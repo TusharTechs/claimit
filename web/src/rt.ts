@@ -56,6 +56,7 @@ async function nexconnTransport(cfg: AppConfig): Promise<Transport> {
     { messageType: MSG.DROP, isPersisted: false, isCounted: false },
     { messageType: MSG.EVENT, isPersisted: false, isCounted: false },
     { messageType: MSG.CHAT, isPersisted: false, isCounted: false },
+    { messageType: MSG.SELLER_CHAT, isPersisted: false, isCounted: false },
     { messageType: MSG.ORDER, isPersisted: true, isCounted: true },
     { messageType: MSG.ORDER_UPDATE, isPersisted: true, isCounted: true },
   ]);

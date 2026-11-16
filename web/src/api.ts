@@ -12,8 +12,13 @@ export class ApiError extends Error {
 // ---------- local sessions ----------
 
 export interface SellerSession { id: string; key: string; name: string; shop: string; upi: string; currency?: string; payLink?: string | null; payNote?: string | null }
-export interface SellerAccount { role: 'owner' | 'cohost'; cohostName: string | null; pro: boolean; proUntil: number | null; trialUsed: boolean }
+export interface SellerAccount { role: 'owner' | 'cohost'; cohostName: string | null; pro: boolean; proUntil: number | null; trialUsed: boolean;
+  founding?: boolean; referred?: boolean; referrals?: number }
 export interface Cohost { id: string; name: string; created: number }
+export interface Insights {
+  currency: string; drops: number; sold: number; revenue: number; rescuedAllTime: number; rescuedThisMonth: number; pro: boolean;
+  noShowRate?: number | null; buyers?: number; repeatBuyers?: number; avgPaySec?: number; avgConfirmSec?: number | null; bestHourUtc?: number | null;
+}
 export interface BuyerSession { id: string; key: string; name: string; isGuest?: boolean }
 
 const read = <T,>(k: string): T | null => {
@@ -73,7 +78,7 @@ export interface SellerDrop {
 }
 
 export interface ShopDrop { id: string; title: string; status: 'live' | 'ended'; created: number; items: number; sold: number; cover: string | null }
-export interface Shop { id: string; shop: string; name: string; followers: number; orders: number; since: number; avgConfirmSec?: number | null; following: boolean; drops: ShopDrop[] }
+export interface Shop { id: string; shop: string; name: string; followers: number; orders: number; since: number; avgConfirmSec?: number | null; rejectedPct?: number; reports?: number; following: boolean; drops: ShopDrop[] }
 export interface Impact {
   sellers: number; drops: number; buyers: number; claimsSettled: number; contestedItems: number; itemsSold: number; gmvUsd: number;
   demo?: { visitors: number; claimTaps: number; humanWins: number }; proWaitlist?: number;
@@ -85,9 +90,11 @@ export const api = {
 
   markShipped: (claimId: string, tracking: string) => req('POST', `/api/seller/claims/${claimId}/shipped`, { tracking }, 'seller'),
   practiceDrop: () => req<{ id: string }>('POST', '/api/seller/practice', {}, 'seller'),
-  createSeller: (b: { name: string; shop: string; upi: string; phone?: string; currency?: string }) =>
+  createSeller: (b: { name: string; shop: string; upi: string; phone?: string; currency?: string; ref?: string | null }) =>
     req<SellerSession & { userId: string; token: string }>('POST', '/api/sellers', b),
   sellerSession: () => req<SellerSession & SellerAccount & { userId: string; token: string }>('POST', '/api/seller/session', {}, 'seller'),
+  reportShop: (sellerId: string, reason: string, text: string) => req('POST', `/api/shops/${sellerId}/report`, { reason, text }, 'buyer'),
+  insights: () => req<Insights>('GET', '/api/seller/insights', undefined, 'seller'),
   proTrial: () => req<{ pro: boolean; proUntil: number }>('POST', '/api/seller/pro/trial', {}, 'seller'),
   cohosts: () => req<Cohost[]>('GET', '/api/seller/cohosts', undefined, 'seller'),
   addCohost: (name: string) => req<{ id: string; name: string; link: string }>('POST', '/api/seller/cohosts', { name }, 'seller'),

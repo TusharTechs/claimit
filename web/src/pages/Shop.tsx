@@ -7,6 +7,7 @@ import { ensureBuyer } from '../buyer';
 import { ItemThumb, Logo, LogoMark, Spinner, useToasts } from '../components/ui';
 import { celebrate } from '../components/ui';
 import { approx } from '../util';
+import { ReportShop } from '../components/ReportShop';
 
 export default function Shop() {
   const { sellerId = '' } = useParams();
@@ -54,6 +55,9 @@ export default function Shop() {
           <ShieldCheck className="size-4 text-mint" /> Fair drops on ClaimIt since {new Date(shop.since).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}
         </p>
         {shop.avgConfirmSec ? <p className="mt-0.5 text-sm text-muted">Usually confirms payments in {approx(shop.avgConfirmSec)}</p> : null}
+        {(shop.reports ?? 0) >= 2 || (shop.rejectedPct ?? 0) >= 20
+          ? <p className="mt-0.5 text-sm font-bold text-hot-dark">⚠ {[(shop.reports ?? 0) >= 2 && `${shop.reports} buyer reports`, (shop.rejectedPct ?? 0) >= 20 && `${shop.rejectedPct}% of payments not confirmed`].filter(Boolean).join(' · ')}</p>
+          : null}
         <div className="mt-4 grid grid-cols-3 gap-2">
           {[['Followers', shop.followers], ['Drops', shop.drops.length], ['Orders', shop.orders]].map(([k, v]) => (
             <div key={k as string} className="rounded-2xl bg-card py-3 shadow-[var(--shadow-card)]"><div className="font-display text-2xl font-extrabold">{v}</div><div className="text-xs text-muted">{k}</div></div>
@@ -95,7 +99,8 @@ export default function Shop() {
 
       <footer className="mt-12 flex flex-col items-center gap-2 text-center text-sm text-muted">
         <LogoMark className="size-8" />
-        <p>Selling through Instagram or WhatsApp lives? <Link to="/sell" className="font-semibold text-hot-dark underline">Run your own fair drop — free</Link></p>
+        <p>Selling through Instagram or WhatsApp lives? <Link to={`/sell?ref=${shop.id}`} className="font-semibold text-hot-dark underline">Run your own fair drop — free</Link></p>
+        <ReportShop sellerId={shop.id} shop={shop.shop} className="mt-2" />
       </footer>
     </div>
   );

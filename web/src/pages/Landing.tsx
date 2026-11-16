@@ -287,7 +287,7 @@ export default function Landing() {
 
         {/* CTA */}
         <section className="mx-auto mb-16 max-w-6xl px-4 sm:px-6">
-          <div className="flex flex-col items-start justify-between gap-6 rounded-[32px] bg-hot p-8 text-white sm:flex-row sm:items-center sm:p-12">
+          <div className="flex flex-col items-start justify-between gap-6 rounded-[32px] bg-hot-dark p-8 text-white sm:flex-row sm:items-center sm:p-12">
             <div>
               <h2 className="font-display text-4xl font-extrabold leading-tight">Your next drop, minus the chaos.</h2>
               <p className="mt-2 text-white/85">Set up in 20 seconds, in any currency. Free forever — and no cut of your sales.</p>

@@ -25,11 +25,11 @@ Millions of social sellers run live sales on Instagram, TikTok, Facebook, YouTub
 | Followers notified when a shop opens a new drop | Direct channel batch send (up to 1,000 recipients per call) |
 | Live viewer count | `/v4/open-channel/get` (server, cached for 5s) plus participant events |
 | Demo room's "next item in 6s" countdown | Open channel metadata (`drop.nextAt`) |
-| Identity | Server-issued **access tokens**. The App Secret never reaches the browser. |
+| Identity | Server-issued **access tokens**. The App Secret never reaches the browser. Pro co-hosts get their own identity (`c_<id>`), never the shop's: the webhooks only accept it while the co-host is on the team and the shop is on Pro, so removing a co-host cuts them off at once |
 
 The **claim arbiter** runs on the app server. Every state change is a single synchronous SQLite transaction in one Node process, so two buyers who tap in the same millisecond can never both win. After each commit, the server publishes the new queue to the open channel's metadata, sends a priority event to the room, and sends or updates the winner's order card.
 
-Prove it: with the mock server running, `npm run test:race` fires 200 simultaneous claims at one item and checks for exactly one winner, a gap-free waitlist in tap order, a public state that matches what each buyer was told, and correct promotion when the winner lets go.
+Prove it: with the mock server running, `npm run test:race` fires 200 simultaneous claims at one item and checks for exactly one winner, a gap-free waitlist in tap order, a public state that matches what each buyer was told, and correct promotion when the winner lets go. It also checks that a paid or sold item can't be pulled or dropped again, that a racing confirm and reject resolve to exactly one decision, and that "Run again" never copies an item someone is still holding.
 
 **Reliability details:**
 
@@ -50,6 +50,18 @@ Prove it: with the mock server running, `npm run test:race` fires 200 simultaneo
 
 - Shops choose a currency. Buyers pay the seller directly: by UPI, by the seller's own payment link (PayPal.me, Venmo and Cash App links get the amount pre-filled; Stripe, Wise and others work as-is), or by account details the seller types once (GCash number, bank account, Zelle email). The buyer taps "I've paid" and adds an optional transaction ID, then the seller confirms in one tap. ClaimIt never holds money.
 - Low-priority shedding is a Nexconn server behaviour under load (more than about 40 messages per 200 ms in a room). ClaimIt configures it but doesn't simulate floods.
+
+## Business model
+
+The full Business Model Canvas, unit economics and impact are in the app at `/business`. Here's what's real in the product today:
+
+- **Revenue:** Pro is $9 a month, flat, with 0% commission. The 14-day trial needs no card, and invited shops get 30 days. Pro unlocks co-hosts and lifetime analytics: no-show rate, repeat buyers, time to pay and best hour. The first 100 shops are flagged as founding sellers.
+- **Measurable value:** every drop recap and the seller home show sales rescued from no-shows (expired holds only) and races settled.
+- **Channels:**
+  - Seller-to-seller invite links: the invited shop gets 30 days of Pro, and the inviter gets a month after the invited shop's first sale.
+  - Buyer share links track which shares bring people in.
+  - Followers are notified of new drops, at most once every 30 minutes.
+- **Buyer protection for direct payment:** a "Report this shop" button. The trust line shows confirmed orders and confirm speed, plus a warning when a shop has several reports or rejects many payments.
 
 ## Run locally
 

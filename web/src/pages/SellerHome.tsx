@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { api, ApiError, sessions, type Cohost, type SellerAccount, type SellerDropSummary, type SellerSession } from '../api';
+import { api, ApiError, sessions, type Cohost, type Insights, type SellerAccount, type SellerDropSummary, type SellerSession } from '../api';
+import { approx, money } from '../util';
 import { ConfirmSheet, CopyButton, Logo, Spinner } from '../components/ui';
-import { Crown, RotateCcw, UserPlus, X } from 'lucide-react';
+import { Crown, Lock, RotateCcw, TrendingUp, UserPlus, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function SellerHome() {
@@ -35,7 +36,7 @@ function guessCurrency() {
 }
 
 function Onboard({ onDone }: { onDone: (s: SellerSession) => void }) {
-  const [f, setF] = useState({ name: '', shop: '', upi: '', phone: '', currency: guessCurrency() });
+  const [f, setF] = useState({ name: '', shop: '', upi: '', phone: '', currency: guessCurrency(), ref: new URLSearchParams(location.search).get('ref') });
   const india = f.currency === 'INR';
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -52,7 +53,7 @@ function Onboard({ onDone }: { onDone: (s: SellerSession) => void }) {
         <h1 className="mt-2 font-display text-4xl font-extrabold leading-tight">{created.shop} is ready</h1>
         <p className="mt-2 text-ink-2">One last thing: save your private login link, so you can open your shop on any phone or laptop — even if this browser is cleared.</p>
         <div className="mt-5 space-y-2">
-          <a className="btn w-full bg-[#25D366] py-3.5 text-white" target="_blank" rel="noreferrer" onClick={() => setSaved(true)}
+          <a className="btn w-full bg-[#075E54] py-3.5 text-white" target="_blank" rel="noreferrer" onClick={() => setSaved(true)}
             href={created.phone ? `https://wa.me/${created.currency === 'INR' ? '91' : ''}${created.phone.replace(/^\+/, '')}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`}>
             WhatsApp it to myself
           </a>
@@ -105,6 +106,7 @@ function Onboard({ onDone }: { onDone: (s: SellerSession) => void }) {
 function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => void }) {
   const nav = useNavigate();
   const [drops, setDrops] = useState<SellerDropSummary[] | null>(null);
+  const [again, setAgain] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [liveUrl, setLiveUrl] = useState('');
   const [hold, setHold] = useState(5);
@@ -150,7 +152,9 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
         <button className="btn mt-3 w-full bg-hot-dark py-3 text-white" disabled={busy || !title.trim()}>{busy ? <Spinner /> : 'Create drop room'}</button>
       </form>
 
+      <ValueCard />
       <ProTeam shop={seller.shop} />
+      <InviteCard sellerId={seller.id} shop={seller.shop} />
 
       <div className="mt-8">
         <div className="mb-2 text-xs font-bold uppercase tracking-wider text-muted">Your drops</div>
@@ -167,10 +171,12 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
                 <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${d.status === 'live' ? 'bg-hot-dark text-white' : 'bg-line text-ink-2'}`}>{d.status === 'live' ? 'LIVE' : 'ENDED'}</span>
               </Link>
               {d.status === 'ended' && d.items > d.sold && (
-                <button className="btn shrink-0 bg-paper px-3 py-2 text-sm" title="New drop with the unsold items" onClick={async () => {
+                <button className="btn shrink-0 bg-paper px-3 py-2 text-sm" title="New drop with the unsold items" disabled={again === d.id} onClick={async () => {
+                  if (again) return;
+                  setAgain(d.id);
                   try { const r = await api.runAgain(d.id); toast.success(`New drop ready with ${r.items} unsold item${r.items === 1 ? '' : 's'}`); nav(`/sell/${r.id}`); }
-                  catch (e) { toast.error(e instanceof Error ? e.message : 'Could not start the drop'); }
-                }}><RotateCcw className="size-4" /> Run again</button>
+                  catch (e) { toast.error(e instanceof Error ? e.message : 'Could not start the drop'); setAgain(null); }
+                }}>{again === d.id ? <Spinner /> : <RotateCcw className="size-4" />} Run again</button>
               )}
             </div>
           ))}
@@ -186,6 +192,7 @@ function ProTeam({ shop }: { shop: string }) {
   const [team, setTeam] = useState<Cohost[]>([]);
   const [name, setName] = useState('');
   const [invite, setInvite] = useState<{ name: string; link: string } | null>(null);
+  const [removing, setRemoving] = useState<Cohost | null>(null);
   const [busy, setBusy] = useState(false);
   const load = async () => {
     try {
@@ -205,10 +212,11 @@ function ProTeam({ shop }: { shop: string }) {
         <Crown className="size-8 shrink-0 text-sun" />
         <div className="flex-1">
           <div className="font-display text-xl font-bold">Go live with a co-host</div>
-          <p className="text-sm text-white/75">Pro lets a helper confirm payments and drop items from their own phone while you present. $9/month, 0% commission.</p>
+          <p className="text-sm text-white/75">Pro lets a helper confirm payments and drop items from their own phone while you present. $9/month, 0% commission. The trial needs no card: after 14 days you're simply back on Free.</p>
         </div>
+        {acct.founding && <span className="shrink-0 rounded-full bg-sun px-2.5 py-1 text-xs font-bold text-ink">Founding seller · 50% off Pro year one</span>}
         {acct.trialUsed
-          ? <Link to="/pricing" className="btn shrink-0 bg-white px-5 py-2.5 text-ink">See Pro</Link>
+          ? <div className="shrink-0 text-sm text-white/80"><b className="text-white">Your trial has ended.</b> You're on Free and nothing was lost.<br />Co-hosts are paused until Pro.{' '}<Link to="/pricing" className="font-semibold text-sun underline">See Pro</Link></div>
           : <button className="btn shrink-0 bg-sun px-5 py-2.5 text-ink" disabled={busy} onClick={async () => {
               setBusy(true);
               try { await api.proTrial(); toast.success('Pro trial started: 14 days free'); await load(); } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not start the trial'); } finally { setBusy(false); }
@@ -222,23 +230,33 @@ function ProTeam({ shop }: { shop: string }) {
       <div className="flex items-center gap-2">
         <Crown className="size-5 text-[#b07a00]" />
         <div className="font-display text-xl font-bold">Your team</div>
-        <span className="ml-auto rounded-full bg-sun-soft px-2.5 py-1 text-xs font-bold text-[#6b4600]">PRO{acct.proUntil ? ` · until ${new Date(acct.proUntil).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : ''}</span>
+        {acct.founding && <span className="ml-auto rounded-full bg-sun px-2.5 py-1 text-xs font-bold text-ink">Founding</span>}
+        <span className={`${acct.founding ? '' : 'ml-auto '}rounded-full bg-sun-soft px-2.5 py-1 text-xs font-bold text-[#6b4600]`}>PRO{acct.proUntil ? ` · until ${new Date(acct.proUntil).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : ''}</span>
       </div>
       <p className="mt-1 text-sm text-muted">Co-hosts use their own login link: they can drop items, confirm payments and ship. They can't change your plan or team.</p>
-      <ul className="mt-3 space-y-1.5">
+      <div className="mt-3 text-xs font-bold uppercase tracking-wider text-muted">Co-hosts · {team.length}/5</div>
+      <ul className="mt-1.5 space-y-1.5">
+        {team.length === 0 && <li className="rounded-xl bg-paper px-3 py-3 text-sm text-muted">No co-hosts yet. Add the friend who usually helps during your lives.</li>}
         {team.map((c) => (
-          <li key={c.id} className="flex items-center justify-between rounded-xl bg-paper px-3 py-2 text-sm">
+          <li key={c.id} className="flex items-center justify-between rounded-xl bg-paper py-1 pl-3 pr-1 text-sm">
             <span className="font-semibold">{c.name}</span>
-            <button className="grid size-7 place-items-center rounded-full hover:bg-line" aria-label={`Remove ${c.name}`} onClick={async () => { await api.removeCohost(c.id).catch(() => {}); load(); }}><X className="size-4" /></button>
+            <button className="grid size-10 place-items-center rounded-full hover:bg-line" aria-label={`Remove ${c.name}`} onClick={() => setRemoving(c)}><X className="size-4" /></button>
           </li>
         ))}
       </ul>
+      <ConfirmSheet open={!!removing} onClose={() => setRemoving(null)} title={`Remove ${removing?.name ?? ''}?`} tone="ink"
+        body="Their login link stops working straight away. You can add them again later." confirmLabel="Remove co-host"
+        onConfirm={async () => {
+          if (!removing) return;
+          try { await api.removeCohost(removing.id); toast.success(`${removing.name} removed`); } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not remove'); }
+          load();
+        }} />
       <form className="mt-3 flex gap-2" onSubmit={async (e) => {
         e.preventDefault(); setBusy(true);
         try { const r = await api.addCohost(name.trim()); setInvite(r); setName(''); load(); } catch (e2) { toast.error(e2 instanceof Error ? e2.message : 'Could not add'); } finally { setBusy(false); }
       }}>
         <input className="input !py-2 text-sm" placeholder="Co-host name, e.g. Riya" value={name} onChange={(e) => setName(e.target.value)} maxLength={40} aria-label="Co-host name" />
-        <button className="btn shrink-0 bg-ink px-4 text-sm text-white" disabled={busy || name.trim().length < 2}><UserPlus className="size-4" /> Add</button>
+        <button className="btn shrink-0 bg-ink px-4 text-sm text-white" disabled={busy || name.trim().length < 2 || team.length >= 5}><UserPlus className="size-4" /> {team.length >= 5 ? 'Team full' : 'Add'}</button>
       </form>
       {invite && (
         <div className="mt-3 rounded-2xl bg-mint-soft p-3 text-sm">
@@ -246,10 +264,63 @@ function ProTeam({ shop }: { shop: string }) {
           <div className="mt-1 break-all font-mono text-xs text-ink-2">{link}</div>
           <div className="mt-2 flex gap-2">
             <CopyButton text={link} label="Copy link" className="!py-1.5" />
-            <a className="btn bg-[#25D366] px-4 py-1.5 text-sm text-white" target="_blank" rel="noreferrer" href={`https://wa.me/?text=${encodeURIComponent(`You're a co-host for ${shop} on ClaimIt. Open this on your phone (keep it private): ${link}`)}`}>WhatsApp</a>
+            <a className="btn bg-[#075E54] px-4 py-1.5 text-sm text-white" target="_blank" rel="noreferrer" href={`https://wa.me/?text=${encodeURIComponent(`You're a co-host for ${shop} on ClaimIt. Open this on your phone (keep it private): ${link}`)}`}>WhatsApp</a>
           </div>
         </div>
       )}
+    </section>
+  );
+}
+
+/** What ClaimIt has been worth to this shop, all-time. Pro unlocks the deeper analytics. */
+function ValueCard() {
+  const [v, setV] = useState<Insights | null>(null);
+  useEffect(() => { api.insights().then(setV).catch(() => {}); }, []);
+  if (!v || v.drops === 0) return null;
+  const m = (n: number) => money(n, v.currency);
+  const paysForPro = v.rescuedThisMonth > 0;
+  return (
+    <section className="mt-6 rounded-[26px] bg-mint p-5 text-white shadow-[var(--shadow-card)]">
+      <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-white/80"><TrendingUp className="size-4" /> What fair drops did for you</div>
+      <div className="mt-2 grid gap-3 sm:grid-cols-3">
+        <div><div className="font-display text-3xl font-extrabold">{m(v.rescuedAllTime)}</div><div className="text-sm text-white/95">rescued from no-shows, all time: sales comment-selling would have lost</div></div>
+        <div><div className="font-display text-3xl font-extrabold">{m(v.revenue)}</div><div className="text-sm text-white/95">sold through {v.drops} drop{v.drops === 1 ? '' : 's'}, 0% commission</div></div>
+        <div><div className="font-display text-3xl font-extrabold">{m(v.rescuedThisMonth)}</div><div className="text-sm text-white/95">rescued in the last 30 days{paysForPro ? ' — more than covers Pro' : ''}</div></div>
+      </div>
+      {v.pro ? (
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
+          {([
+            ['No-show rate', v.noShowRate != null ? `${v.noShowRate}%` : '—'],
+            ['Repeat buyers', `${v.repeatBuyers ?? 0}/${v.buyers ?? 0}`],
+            ['Avg time to pay', v.avgPaySec ? approx(v.avgPaySec) : '—'],
+            ['Your avg confirm', v.avgConfirmSec ? approx(v.avgConfirmSec) : '—'],
+            ['Best hour to drop', v.bestHourUtc != null ? new Date(Date.UTC(2020, 0, 1, v.bestHourUtc)).toLocaleTimeString(undefined, { hour: 'numeric' }) : '—'],
+          ] as const).map(([k, val]) => (
+            <div key={k} className="rounded-xl bg-white/15 px-3 py-2"><div className="font-display text-lg font-extrabold">{val}</div><div className="text-[11px] text-white/95">{k}</div></div>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-4 flex items-center gap-2 rounded-xl bg-white/15 px-3 py-2 text-sm"><Lock className="size-4 shrink-0" />
+          <span>Pro shows your no-show rate, repeat buyers, time to pay and the best hour to drop. <Link to="/pricing" className="font-semibold underline">See Pro</Link></span></div>
+      )}
+    </section>
+  );
+}
+
+/** Seller-to-seller referrals: the channel that matters most for a tool sellers see each other use. */
+function InviteCard({ sellerId, shop }: { sellerId: string; shop: string }) {
+  const link = `${location.origin}/sell?ref=${sellerId}`;
+  const msg = `I run my live drops with ClaimIt: first tap wins, no more "I commented first!" fights, and no-shows go to the next buyer automatically. Free to start: ${link}`;
+  return (
+    <section className="mt-4 flex flex-col gap-3 rounded-[26px] border border-line bg-card p-5 shadow-[var(--shadow-card)] sm:flex-row sm:items-center">
+      <div className="flex-1">
+        <div className="font-display text-lg font-bold">Know another live seller?</div>
+        <p className="text-sm text-muted">They get a 30-day Pro trial. When they finish their first drop with a sale, {shop} gets a month of Pro free.</p>
+      </div>
+      <div className="flex shrink-0 gap-2">
+        <CopyButton text={link} label="Copy invite link" className="!py-2" />
+        <a className="btn bg-[#075E54] px-4 py-2 text-sm text-white" target="_blank" rel="noreferrer" href={`https://wa.me/?text=${encodeURIComponent(msg)}`}>WhatsApp</a>
+      </div>
     </section>
   );
 }

@@ -25,6 +25,7 @@ export default function SellerConsole() {
     if (ids.length) try { const r = await api.people(dropId, ids); setPeople((p) => ({ ...p, ...r })); } catch { /* ignore */ }
   }, 300);
   const [viewers, setViewers] = useState<number | null>(null);
+  const [role, setRole] = useState<'owner' | 'cohost'>('owner');
   // Buyer questions that arrive while the seller is on another tab.
   const [roomUnread, setRoomUnread] = useState(0);
   const roomScroll = useRef<HTMLDivElement>(null);
@@ -73,7 +74,9 @@ export default function SellerConsole() {
       try {
         const s = await api.sellerSession();
         const wide = window.matchMedia('(min-width: 1024px)').matches;
-        if (wide && !rt.me) rt.beforeConnect(() => setupChatUI(s.userId, s.shop));
+        setRole(s.role);
+        // Buyer chats belong to the shop owner; co-hosts run the room and payments under their own identity.
+        if (wide && !rt.me && s.role === 'owner') rt.beforeConnect(() => setupChatUI(s.userId, s.shop));
         await rt.connect(s.token, s.userId);
         if (cancelled) return;
         setChatUI(chatUIReady());
@@ -150,8 +153,9 @@ export default function SellerConsole() {
   };
   dropNextRef.current = () => { if (nextDraft) act(() => api.dropItem(drop.id, nextDraft.id), `Dropped #${nextDraft.idx} ${nextDraft.name}!`); };
 
+  const goPanel = (k: Tab) => { setTab(k); if (k === 'room') setRoomUnread(0); document.getElementById('seller-panel')?.scrollIntoView({ behavior: 'smooth' }); };
   return (
-    <div className="min-h-full">
+    <div className="min-h-full pb-20 lg:pb-0">
       <header className="sticky top-0 z-30 border-b border-line bg-paper/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
           <Link to="/sell"><Logo className="text-lg" /></Link>
@@ -160,7 +164,7 @@ export default function SellerConsole() {
             <div className="truncate text-xs text-muted">{drop.shop}</div>
           </div>
           {ended ? <span className="rounded-full bg-line px-2.5 py-1 text-xs font-bold">ENDED</span> : (
-            <span className="flex items-center gap-1.5 rounded-full bg-ink px-2.5 py-1 text-xs font-bold text-white"><span className="anim-live size-1.5 rounded-full bg-hot" />LIVE{viewers ? ` · ${viewers} in room` : ''}</span>
+            <span className="flex items-center gap-1.5 whitespace-nowrap rounded-full bg-ink px-2.5 py-1 text-xs font-bold text-white"><span className="anim-live size-1.5 rounded-full bg-hot" />LIVE{viewers ? <> · {viewers}<span className="hidden sm:inline">&nbsp;in room</span></> : ''}</span>
           )}
           {chatUI && (
             <button onClick={() => openInbox()} className="btn relative bg-ink px-3 py-1.5 text-sm text-white">
@@ -168,7 +172,7 @@ export default function SellerConsole() {
               {totalUnread > 0 && <span className="absolute -right-1 -top-1 grid size-5 place-items-center rounded-full bg-hot-dark text-[11px]">{totalUnread}</span>}
             </button>
           )}
-          <a href={link} target="_blank" rel="noreferrer" className="btn hidden border-2 border-ink px-3 py-1.5 text-sm sm:inline-flex">Open buyer view ↗</a>
+          <a href={link} target="_blank" rel="noreferrer" className="btn whitespace-nowrap border-2 border-ink px-3 py-1.5 text-sm"><span className="sm:hidden">Buyer view ↗</span><span className="hidden sm:inline">Open buyer view ↗</span></a>
         </div>
       </header>
 
@@ -188,7 +192,7 @@ export default function SellerConsole() {
               <div className="mt-1 truncate rounded-xl bg-paper px-3 py-2 font-mono text-sm">{link}</div>
               <div className="mt-2 flex flex-wrap gap-2">
                 <CopyButton text={link} label="Copy link" />
-                <a className="btn bg-[#25D366] px-4 py-2 text-sm text-white" target="_blank" rel="noreferrer"
+                <a className="btn bg-[#075E54] px-4 py-2 text-sm text-white" target="_blank" rel="noreferrer"
                   href={`https://wa.me/?text=${encodeURIComponent(`🔥 ${drop.shop} is dropping LIVE now — first tap wins! ${link}`)}`}>WhatsApp</a>
                 <button className="btn border-2 border-ink px-4 py-1.5 text-sm" onClick={() => act(() => api.downloadOrders(drop.id))}>Orders CSV</button>
                 <button className="btn border-2 border-line px-4 py-1.5 text-sm text-ink-2" onClick={() => setDeviceOpen(true)}>Use on another device</button>
@@ -250,13 +254,21 @@ export default function SellerConsole() {
         {/* Right panel */}
         <aside id="seller-panel" className="lg:sticky lg:top-[76px] lg:h-[calc(100dvh-96px)]">
           <div className="flex h-full min-h-[420px] flex-col rounded-[26px] border border-line bg-card p-3 shadow-[var(--shadow-card)]">
-            <div className="flex gap-1 rounded-full bg-paper p-1" role="tablist" aria-label="Seller panel">
+            <div className="flex gap-1 rounded-full bg-paper p-1" role="tablist" aria-label="Seller panel" onKeyDown={(e) => {
+              // Arrow keys move between tabs (WAI-ARIA tabs pattern).
+              const order: Tab[] = ['pay', 'room', 'inbox'];
+              const i = order.indexOf(tab);
+              const next = e.key === 'ArrowRight' ? order[(i + 1) % 3] : e.key === 'ArrowLeft' ? order[(i + 2) % 3] : e.key === 'Home' ? order[0] : e.key === 'End' ? order[2] : null;
+              if (!next) return;
+              e.preventDefault(); setTab(next); if (next === 'room') setRoomUnread(0);
+              requestAnimationFrame(() => document.getElementById(`seller-tab-${next}`)?.focus());
+            }}>
               {([['pay', `Payments${needsAction ? ` (${needsAction})` : ''}`], ['room', `Room${roomUnread ? ` (${roomUnread})` : ''}`], ['inbox', `Inbox${totalUnread ? ` (${totalUnread})` : ''}`]] as [Tab, string][]).map(([k, l]) => (
-                <button key={k} role="tab" aria-selected={tab === k} aria-controls="seller-tabpanel" onClick={() => { setTab(k); if (k === 'room') setRoomUnread(0); }}
+                <button key={k} id={`seller-tab-${k}`} role="tab" aria-selected={tab === k} aria-controls="seller-tabpanel" tabIndex={tab === k ? 0 : -1} onClick={() => { setTab(k); if (k === 'room') setRoomUnread(0); }}
                   className={`flex-1 rounded-full py-2 text-sm font-semibold ${tab === k ? 'bg-ink text-white' : 'text-ink-2'}`}>{l}</button>
               ))}
             </div>
-            <div className="mt-3 flex min-h-0 flex-1 flex-col" id="seller-tabpanel" role="tabpanel">
+            <div className="mt-3 flex min-h-0 flex-1 flex-col" id="seller-tabpanel" role="tabpanel" aria-labelledby={`seller-tab-${tab}`}>
               {tab === 'pay' && (
                 <div className="scroll-thin min-h-0 flex-1 space-y-2 overflow-y-auto">
                   {toConfirm.length === 0 && <p className="py-8 text-center text-sm text-muted">When a buyer claims and pays, confirm it here.</p>}
@@ -282,12 +294,15 @@ export default function SellerConsole() {
                 </div>
               )}
               {tab === 'room' && channelId && (
-                <RoomReply onSend={async (text) => {
+                <RoomReply shopId={data?.drop.sellerId ?? ''} onSend={async (text) => {
                   try { await api.sellerSay(dropId, text); } // arrives back via the room (echo) with its real message id
                   catch (e) { toasts.push(e instanceof Error ? e.message : 'Could not send', 'hot'); }
                 }} />
               )}
-              {tab === 'inbox' && chatUI && (
+              {tab === 'inbox' && role === 'cohost' && (
+                <p className="py-8 text-center text-sm text-muted">Buyer chats go to the shop owner's inbox. As a co-host you can drop items, confirm payments and reply in the room.</p>
+              )}
+              {tab === 'inbox' && role === 'owner' && chatUI && (
                 <div className="flex min-h-0 flex-1 flex-col">
                   <button className="btn w-full bg-ink py-3 text-white" onClick={() => openInbox()}>Open full inbox</button>
                   <p className="mt-2 text-center text-xs text-muted">Powered by Nexconn Chat UI: every order chat, with read receipts, images and history.</p>
@@ -302,7 +317,7 @@ export default function SellerConsole() {
                   </div>
                 </div>
               )}
-              {tab === 'inbox' && !chatUI && (
+              {tab === 'inbox' && role === 'owner' && !chatUI && (
                 inboxPeer ? (
                   <div className="flex min-h-0 flex-1 flex-col">
                     <button className="mb-1 flex items-center gap-2 text-left text-sm font-semibold" onClick={() => setInboxPeer(null)}>
@@ -343,8 +358,19 @@ export default function SellerConsole() {
         })()}
       </Sheet>
 
+      {/* Phones: the panel sits below the item list, so a thumb-reach tab bar jumps straight to it. */}
+      <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-line bg-card/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1.5 backdrop-blur lg:hidden" aria-label="Seller sections">
+        {([['items', 'Items', 0], ['pay', 'Payments', needsAction], ['room', 'Room', roomUnread], ['inbox', 'Inbox', totalUnread]] as const).map(([k, l, n]) => (
+          <button key={k} className={`relative flex-1 rounded-xl py-2 text-sm font-semibold ${k !== 'items' && tab === k ? 'text-ink' : 'text-ink-2'}`}
+            onClick={() => (k === 'items' ? window.scrollTo({ top: 0, behavior: 'smooth' }) : goPanel(k))}>
+            {l}
+            {n > 0 && <span className="absolute right-[18%] top-0.5 grid min-w-5 place-items-center rounded-full bg-hot-dark px-1 text-[11px] font-bold text-white">{n}</span>}
+          </button>
+        ))}
+      </nav>
+
       {nextDraft && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center px-4 lg:justify-start lg:pl-[max(1rem,calc((100vw-72rem)/2+1rem))]">
+        <div className="pointer-events-none fixed inset-x-0 bottom-[76px] z-40 flex justify-center px-4 lg:bottom-4 lg:justify-start lg:pl-[max(1rem,calc((100vw-72rem)/2+1rem))]">
           <button className="btn anim-ring pointer-events-auto bg-hot-dark px-6 py-3.5 text-white shadow-[var(--shadow-pop)]" onClick={() => dropNextRef.current()}>
             <Play className="size-4 fill-current" /> Drop next: #{nextDraft.idx} {nextDraft.name.length > 28 ? nextDraft.name.slice(0, 27) + '…' : nextDraft.name}
             <kbd className="ml-1 hidden rounded-md bg-white/25 px-1.5 text-xs font-bold sm:inline">D</kbd>
@@ -578,16 +604,30 @@ function Recap({ stats, items, claims, shop }: { stats: SellerDrop['stats']; ite
       <p className="mt-3 text-sm text-white/75">Zero double-claims: every item went to exactly one person, in front of everyone.</p>
       <div className="mt-4 flex flex-wrap gap-2">
         <CopyButton text={text} label="Copy recap" className="!bg-white !text-ink" />
-        <a className="btn bg-[#25D366] px-4 py-2 text-sm text-white" target="_blank" rel="noreferrer" href={`https://wa.me/?text=${encodeURIComponent(text)}`}>Share on WhatsApp</a>
+        <a className="btn bg-[#075E54] px-4 py-2 text-sm text-white" target="_blank" rel="noreferrer" href={`https://wa.me/?text=${encodeURIComponent(text)}`}>Share on WhatsApp</a>
       </div>
     </section>
   );
 }
 
 /** The shop answers the room: buyers see these with a "Seller" badge (server-verified sender). */
-function RoomReply({ onSend }: { onSend: (text: string) => Promise<void> }) {
+const DEFAULT_REPLIES = ['Checking for you… ⏳', 'Yes! 🙌', 'Next item in 1 min', 'Sorry, sold out 🙏', 'Payment received, thank you! 💚'];
+
+function RoomReply({ shopId, onSend }: { shopId: string; onSend: (text: string) => Promise<void> }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
+  // Quick replies are the shop's own words (saved on this device): the app never promises shipping or sizing for them.
+  const storeKey = `claimit.replies.${shopId}`;
+  const [replies, setReplies] = useState<string[]>(() => {
+    try { const v = JSON.parse(localStorage.getItem(storeKey) || 'null'); return Array.isArray(v) && v.length ? v : DEFAULT_REPLIES; } catch { return DEFAULT_REPLIES; }
+  });
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const saveReplies = (list: string[]) => {
+    const clean = list.map((r) => r.trim().slice(0, 80)).filter(Boolean).slice(0, 8);
+    setReplies(clean.length ? clean : DEFAULT_REPLIES);
+    try { localStorage.setItem(storeKey, JSON.stringify(clean)); } catch { /* private mode */ }
+  };
   const send = async (t: string) => {
     const v = t.trim();
     if (!v || busy) return;
@@ -596,11 +636,23 @@ function RoomReply({ onSend }: { onSend: (text: string) => Promise<void> }) {
   };
   return (
     <div className="mt-2 border-t border-line pt-2">
-      <div className="scroll-thin flex gap-1.5 overflow-x-auto pb-1.5">
-        {['Yes, true to size ✅', 'Ships in 2–3 days 📦', 'Next item in 1 min ⏳', 'Sorry, sold out 🙏', 'Payment received, thank you! 💚'].map((q) => (
-          <button key={q} className="shrink-0 rounded-full bg-paper px-3 py-1 text-xs font-semibold hover:bg-line" disabled={busy} onClick={() => send(q)}>{q}</button>
-        ))}
-      </div>
+      {editing ? (
+        <div className="pb-2">
+          <label className="text-xs font-semibold text-muted" htmlFor="quick-replies">Your quick replies, one per line</label>
+          <textarea id="quick-replies" className="input mt-1 text-sm" rows={4} value={draft} onChange={(e) => setDraft(e.target.value)} />
+          <div className="mt-1.5 flex gap-2">
+            <button className="btn bg-ink px-3 py-1.5 text-xs text-white" onClick={() => { saveReplies(draft.split('\n')); setEditing(false); }}>Save</button>
+            <button className="btn bg-paper px-3 py-1.5 text-xs" onClick={() => setEditing(false)}>Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <div className="scroll-thin flex gap-1.5 overflow-x-auto pb-1.5">
+          {replies.map((q) => (
+            <button key={q} className="shrink-0 rounded-full bg-paper px-3 py-1 text-xs font-semibold hover:bg-line" disabled={busy} onClick={() => send(q)}>{q}</button>
+          ))}
+          <button className="shrink-0 rounded-full border border-line px-3 py-1 text-xs font-semibold text-muted" onClick={() => { setDraft(replies.join('\n')); setEditing(true); }}>Edit</button>
+        </div>
+      )}
       <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); send(text); }}>
         <input className="input !py-2 text-sm" value={text} onChange={(e) => setText(e.target.value)} maxLength={200} placeholder="Reply to the room…" aria-label="Reply to the room" />
         <button className="btn bg-ink px-4 text-sm text-white" disabled={busy || !text.trim()}>{busy ? <Spinner /> : 'Send'}</button>

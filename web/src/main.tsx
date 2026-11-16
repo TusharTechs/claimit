@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { MotionConfig } from 'motion/react';
 import './index.css';
 import Landing from './pages/Landing';
 import SellerHome from './pages/SellerHome';
@@ -21,6 +22,7 @@ createRoot(document.getElementById('root')!).render(
     <ErrorBoundary>
     <Toaster position="bottom-center" offset="calc(124px + env(safe-area-inset-bottom))" visibleToasts={2} duration={2800}
       toastOptions={{ className: 'claimit-toast', style: { fontFamily: 'Inter, system-ui, sans-serif', fontWeight: 600, borderRadius: 999 } }} />
+    <MotionConfig reducedMotion="user">
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Landing />} />
@@ -39,6 +41,7 @@ createRoot(document.getElementById('root')!).render(
         <Route path="*" element={<Landing />} />
       </Routes>
     </BrowserRouter>
+    </MotionConfig>
     </ErrorBoundary>
   </StrictMode>,
 );

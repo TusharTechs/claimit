@@ -6,6 +6,7 @@ import { api, ApiError, sessions, type BuyerSession, type Shipping } from '../ap
 import { rt, type RtMessage } from '../rt';
 import { Avatar, ConfirmSheet, CopyButton, ItemThumb, Logo, LogoMark, QR, Sheet, Spinner, celebrate, useToasts } from '../components/ui';
 import { DMThread } from '../components/DMThread';
+import { ReportShop } from '../components/ReportShop';
 import { ensureBuyer, shopIdOf } from '../buyer';
 import { approx, embedUrl, mmss, money, payLinkFor, setCurrency, upiLink, useCountdown, useDebounced } from '../util';
 import {
@@ -48,12 +49,14 @@ export default function Room() {
   useEffect(() => {
     if (!deepOrder || !ordersOpen) return;
     // Scroll to the order from My orders and flash it, so it's obvious which one you came for.
-    const t = setTimeout(() => {
+    // Orders load asynchronously: keep looking for the card for a few seconds rather than guessing a delay.
+    let tries = 0;
+    const t = setInterval(() => {
       const el = document.getElementById(`order-${deepOrder}`);
-      el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      el?.classList.add('anim-flash');
-    }, 600);
-    return () => clearTimeout(t);
+      if (el) { clearInterval(t); el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.classList.add('anim-highlight'); }
+      else if (++tries > 30) clearInterval(t);
+    }, 200);
+    return () => clearInterval(t);
   }, [deepOrder, ordersOpen]);
   const [selected, setSelected] = useState<string | null>(null);
   const [nameFor, setNameFor] = useState<string | null>(null); // item waiting for the buyer's name before claiming
@@ -287,6 +290,11 @@ export default function Room() {
                 : <>New shop · since {new Date(drop.trust.since).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</>}
             </div>
           )}
+          {drop.trust && !drop.demo && (drop.trust.reports >= 2 || drop.trust.rejectedPct >= 20) && (
+            <div className="mt-0.5 text-[11px] font-bold text-hot-dark">
+              ⚠ {[drop.trust.reports >= 2 && `${drop.trust.reports} buyer reports`, drop.trust.rejectedPct >= 20 && `${drop.trust.rejectedPct}% of payments not confirmed`].filter(Boolean).join(' · ')}
+            </div>
+          )}
         </div>
         {ended ? (
           <span className="rounded-full bg-line px-2.5 py-1 text-xs font-bold text-ink-2">ENDED</span>
@@ -401,6 +409,7 @@ export default function Room() {
       <Sheet open={ordersOpen} onClose={() => setOrdersOpen(false)} title="My orders">
         <Orders claims={claims} sellerId={drop.sellerId} shop={drop.shop} buyerName={me?.name ?? ''} onChange={loadClaims} toast={toasts.push} />
         <Link to="/orders" className="mt-3 block text-center text-sm font-semibold text-muted underline">All my orders, from every shop →</Link>
+        {!drop.demo && <div className="mt-2 text-center"><ReportShop sellerId={shopIdOf(drop.sellerId)} shop={drop.shop} /></div>}
       </Sheet>
 
       <NameSheet open={!!nameFor} shop={drop.shop} onClose={() => setNameFor(null)} onDone={async (name) => {
@@ -614,7 +623,8 @@ function Feed({ feed, people, meId, sellerId }: { feed: FeedEntry[]; people: Peo
             <Avatar id={f.sender} name={people[f.sender]?.name ?? f.fallbackName} size={24} />
             <div className="min-w-0 text-[15px] leading-snug">
               <span className="font-semibold">{name}</span>
-              {isSeller && <span className="ml-1 rounded bg-ink px-1.5 py-0.5 align-middle text-[10px] font-bold uppercase text-white">Seller</span>}{' '}
+              {isSeller && <span className="ml-1 rounded bg-ink px-1.5 py-0.5 align-middle text-[10px] font-bold uppercase text-white">Seller</span>}
+              {!isSeller && f.sender.startsWith('c_') && people[f.sender]?.seller && <span className="ml-1 rounded bg-ink/70 px-1.5 py-0.5 align-middle text-[10px] font-bold uppercase text-white">Team</span>}{' '}
               <span className="text-ink-2">{text}</span>
               {text !== f.text && <span className="ml-1 inline-flex items-center gap-0.5 text-[11px] text-muted"><Lock className="size-3" />pay only via your ClaimIt order</span>}
             </div>

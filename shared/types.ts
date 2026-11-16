@@ -115,7 +115,9 @@ export interface PublicDrop {
   trust?: SellerTrust;
 }
 
-export interface SellerTrust { orders: number; since: number; avgConfirmSec: number | null }
+export interface SellerTrust { orders: number; since: number; avgConfirmSec: number | null;
+  /** Share of "I've paid" claims the shop rejected, and how many buyers reported the shop: shown so buyers can judge risk. */
+  rejectedPct: number; reports: number }
 
 export interface MyClaim {
   id: string;

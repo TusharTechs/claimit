@@ -113,12 +113,23 @@ addColumn('sellers', 'currency', "TEXT NOT NULL DEFAULT 'INR'");
 addColumn('sellers', 'pay_link', 'TEXT');
 addColumn('sellers', 'pay_note', 'TEXT');
 addColumn('sellers', 'pro_until', 'INTEGER'); // Pro is active while now < pro_until (trial or paid)
-addColumn('sellers', 'trial_used', 'INTEGER NOT NULL DEFAULT 0'); // account details (GCash number, bank account, Zelle email…)
+addColumn('sellers', 'trial_used', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('sellers', 'founding', 'INTEGER NOT NULL DEFAULT 0'); // first 100 shops: 50% off Pro for a year
+addColumn('sellers', 'ref_by', 'TEXT'); // the shop that invited this one
+addColumn('sellers', 'ref_rewarded', 'INTEGER NOT NULL DEFAULT 0'); // account details (GCash number, bank account, Zelle email…)
 addColumn('drops', 'practice', 'INTEGER NOT NULL DEFAULT 0');
 db.exec(`
 CREATE TABLE IF NOT EXISTS follows (
   seller_id TEXT NOT NULL REFERENCES sellers(id),
   buyer_id TEXT NOT NULL REFERENCES buyers(id),
+  created INTEGER NOT NULL,
+  PRIMARY KEY (seller_id, buyer_id)
+);
+CREATE TABLE IF NOT EXISTS shop_reports (
+  seller_id TEXT NOT NULL,
+  buyer_id TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  text TEXT,
   created INTEGER NOT NULL,
   PRIMARY KEY (seller_id, buyer_id)
 );

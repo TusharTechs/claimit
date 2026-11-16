@@ -6,7 +6,7 @@ import {
 import { Logo } from '../components/ui';
 
 /** One canvas block. `live` points at the part of the product that already delivers it. */
-interface Block { n: number; title: string; icon: LucideIcon; points: (string | [string, string])[]; live?: [string, string][]; area: string; tone: string }
+interface Block { n: number; title: string; icon: LucideIcon; points: (string | [string, string])[]; live?: [string, string][]; area: string; tone: string; assume?: string }
 
 const BLOCKS: Block[] = [
   {
@@ -59,13 +59,15 @@ const BLOCKS: Block[] = [
       'Founding sellers get 50% off for a year and help shape the roadmap',
     ],
     live: [['My orders', '/orders']],
+    assume: 'Retention rates are unmeasured until pilots run.',
   },
   {
     n: 3, title: 'Channels', icon: Truck, area: 'lg:[grid-area:ch]', tone: 'bg-card',
     points: [
       'Built-in virality: every drop is shared to stories and WhatsApp. Buyers share their wins, and every recap says "Run fair drops with ClaimIt"',
       'A self-serve trial through the public demo room and practice drops',
-      'Seller communities and live-selling coaches, with referral links that track joins from shares',
+      'Seller-to-seller referrals: an invite link gives the new shop a 30-day trial, and the inviter a month of Pro after the new shop\'s first sale',
+      'Seller communities and live-selling coaches, plus buyer share links that track which shares bring people in',
       'Every shop has a public page with its drops and followers, which is a link sellers put in their bio',
     ],
   },
@@ -77,6 +79,7 @@ const BLOCKS: Block[] = [
       ['Their pains:', 'double claims, ghosting winners, scrolling comments, chasing payments, and scammers who pose as the seller.'],
       ['The free side:', 'their buyers, who want a fair shot.'],
       ['Launch markets:', '"mine" comment-selling is already a habit in the Philippines, Indonesia and Malaysia, alongside US resale lives and Indian Instagram thrift with UPI.'],
+      ['Sizing (bottom-up):', 'shops × $108 a year. Every 10,000 Pro shops is about $1.1M in annual recurring revenue. Shop counts per market are an assumption to validate in pilots.'],
       ['Next:', 'live-selling agencies and co-host teams.'],
     ],
   },
@@ -88,16 +91,18 @@ const BLOCKS: Block[] = [
       ['Costs ClaimIt never has:', 'payment processing, holding funds, chargebacks or money-transmitter licensing, because buyers pay sellers directly.'],
       ['Key drivers:', 'MAU above the free plan, and support time. Both grow more slowly than revenue as sellers move to Pro.'],
     ],
+    assume: 'Nexconn per-MAU price above the free plan is to be confirmed.',
   },
   {
     n: 5, title: 'Revenue streams', icon: BarChart3, area: 'lg:[grid-area:rs]', tone: 'bg-mint-soft',
     points: [
-      ['Pro at $9 a month, flat, with 0% commission.', 'Live today: co-hosts, up to 5 helpers who confirm payments and drop items while you present, with a 14-day free trial. On the roadmap: automatic payment confirmation through payment gateways, analytics and a custom shop link.'],
-      ['Terms:', 'a 14-day free trial, billed monthly, with 50% off year one for founding sellers. Local pricing applies per market.'],
+      ['Pro at $9 a month, flat, with 0% commission.', 'Live today: co-hosts (up to 5 helpers who confirm payments and drop items while you present) and lifetime analytics (no-show rate, repeat buyers, time to pay, best hour). Coming next: automatic payment confirmation through gateways, and a custom shop link.'],
+      ['Terms:', 'a 14-day free trial with no card (30 days for invited shops), then monthly. The first 100 shops are flagged as founding sellers with 50% off year one. Each referral that leads to a sale earns a month free.'],
       ['What drives revenue:', 'sellers who run several drops a week, who need co-hosts and automation. That group is also the most active on the free tier.'],
       ['Later:', 'a team plan for agencies that run drops for several shops.'],
     ],
     live: [['Pricing', '/pricing']],
+    assume: 'Billing is not switched on yet: the trial and Pro checks are live, and payment collection comes next.',
   },
 ];
 
@@ -113,13 +118,14 @@ export default function Business() {
       </header>
       <main className="mx-auto max-w-7xl px-4 pb-16 sm:px-6">
         <p className="mt-4 text-sm font-bold uppercase tracking-wider text-hot-dark">Business model</p>
-        <h1 className="mt-1 font-display text-5xl font-extrabold leading-none">How ClaimIt creates, delivers and captures value</h1>
+        <h1 className="mt-1 font-display text-4xl font-extrabold leading-none sm:text-5xl">How ClaimIt creates, delivers and captures value</h1>
         <p className="mt-3 max-w-2xl text-lg text-ink-2">ClaimIt's model on one page. Anything not yet proven by real drops is marked as an assumption.</p>
 
-        <div className="mt-8 grid gap-3 lg:grid-cols-5 lg:[grid-template-areas:'kp_ka_vp_cr_cs'_'kp_kr_vp_ch_cs'_'co_co_co_rs_rs']">
+        <div className="mt-8 grid gap-3 md:grid-cols-2 lg:grid-cols-5 lg:[grid-template-areas:'kp_ka_vp_cr_cs'_'kp_kr_vp_ch_cs'_'co_co_co_rs_rs']">
           {BLOCKS.map((b, i) => (
             <motion.section key={b.n} initial={{ opacity: 0, y: 12 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: i * 0.03 }}
-              className={`rounded-[22px] border border-line p-5 shadow-[var(--shadow-card)] ${b.tone} ${b.area}`}>
+              style={{ order: b.n }}
+              className={`rounded-[22px] border border-line p-5 shadow-[var(--shadow-card)] lg:!order-none ${b.tone} ${b.area}`}>
               <h2 className="flex items-center gap-2.5 font-display text-lg font-bold">
                 <span className="grid size-9 shrink-0 place-items-center rounded-full bg-ink text-white"><b.icon className="size-4.5" /></span>
                 <span><span className="text-muted">{b.n}.</span> {b.title}</span>
@@ -131,10 +137,11 @@ export default function Business() {
                   </li>
                 ))}
               </ul>
+              {b.assume && <p className="mt-3 rounded-xl bg-sun-soft px-3 py-2 text-xs font-semibold text-[#6b4600]">Assumption: {b.assume}</p>}
               {b.live && (
                 <div className="mt-3 flex flex-wrap gap-1.5">
                   {b.live.map(([label, href]) => (
-                    <Link key={href} to={href} className="rounded-full bg-white px-2.5 py-1 text-xs font-bold text-ink shadow-sm hover:bg-paper">● Live: {label} →</Link>
+                    <Link key={href} to={href} className="rounded-full bg-mint-soft px-2.5 py-1 text-xs font-bold text-mint hover:bg-mint hover:text-white">● Live: {label} →</Link>
                   ))}
                 </div>
               )}
@@ -155,6 +162,9 @@ export default function Business() {
             <p className="mt-4 text-[15px] text-white/90">
               <b>Break-even:</b> a Pro seller pays for itself as long as Nexconn's price is below <b>$9 ÷ 150 ≈ $0.06 per monthly active user</b>, plus a share of one small server.
               Within the free plan (the first 10,000 MAU), each Pro seller is nearly all margin. And what the seller saves pays for Pro on its own: a <b>single sale rescued from a no-show</b> each month usually covers $9.
+            </p>
+            <p className="mt-3 text-[15px] text-white/90">
+              <b>LTV vs. acquisition cost:</b> at roughly 90% gross margin and an assumed 18-month lifetime, a Pro shop is worth about <b>$145</b>. Acquisition is mostly organic: buyers see ClaimIt in every drop, and sellers invite sellers with a month of Pro as the reward. That month costs well under $9 to deliver, so each referral pays back with the referred shop's first paid month.
             </p>
           </div>
           <div className="rounded-[26px] border border-line bg-card p-6 shadow-[var(--shadow-card)]">

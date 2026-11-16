@@ -46,7 +46,7 @@ export function DMThread({ peerId, peerName, onActivity, compact = false }: {
       <div className={`scroll-thin min-h-0 flex-1 space-y-2 overflow-y-auto ${compact ? 'max-h-72' : ''} py-2`}>
         {loading && <div className="py-6 text-center text-sm text-muted">Loading chat…</div>}
         {!loading && msgs.length === 0 && <div className="py-6 text-center text-sm text-muted">No messages with {peerName} yet.</div>}
-        {msgs.map((m) => <Bubble key={m.id} m={m} peerId={peerId} />)}
+        {dedupeOrderCards(msgs).map((m) => <Bubble key={m.id} m={m} peerId={peerId} />)}
         <div ref={endRef} />
       </div>
       <form className="mt-2 flex gap-2" onSubmit={(e) => { e.preventDefault(); send(); }}>
@@ -57,6 +57,21 @@ export function DMThread({ peerId, peerName, onActivity, compact = false }: {
       </form>
     </div>
   );
+}
+
+/** A resent order card (after a send that timed out but was delivered) shows once: the first card per claim wins,
+ *  carrying over any newer live status from the duplicate. */
+function dedupeOrderCards(msgs: RtMessage[]) {
+  const first = new Map<string, RtMessage>();
+  const out: RtMessage[] = [];
+  for (const m of msgs) {
+    const claimId = m.type === MSG.ORDER ? (m.content as OrderContent)?.claimId : null;
+    if (!claimId) { out.push(m); continue; }
+    const seen = first.get(claimId);
+    if (!seen) { const copy = { ...m }; first.set(claimId, copy); out.push(copy); }
+    else if (m.meta) seen.meta = { ...(seen.meta || {}), ...m.meta };
+  }
+  return out;
 }
 
 function Bubble({ m, peerId }: { m: RtMessage; peerId: string }) {
