@@ -165,6 +165,7 @@ app.post('/api/seller/session', h(async (req) => {
   return { id: s.id, name: s.name, shop: s.shop, upi: s.upi, currency: s.currency, payLink: s.pay_link, payNote: s.pay_note,
     role: s.role, cohostName: s.cohostName, pro: isPro(s), proUntil: s.pro_until, trialUsed: !!s.trial_used, founding: !!s.founding,
     proPrice: s.founding ? 4.5 : 9, // founding sellers: 50% off for their first year of Pro
+    paidPro: !!db.prepare(`SELECT 1 FROM pro_payments WHERE seller_id = ? AND status = 'confirmed'`).get(s.id),
     referred: !!s.ref_by, referrals: (db.prepare('SELECT COUNT(*) AS n FROM sellers WHERE ref_by = ?').get(s.id) as { n: number }).n,
     userId, token: await nexconn.token(userId, s.cohostName ? `${s.cohostName} (${s.shop} team)` : s.shop) };
 }));
@@ -251,7 +252,7 @@ app.get('/api/seller/profiles', h((req) => {
 
 app.get('/api/seller/drops', h((req) => {
   const s = seller(req);
-  return db.prepare(`SELECT d.id, d.title, d.status, d.created,
+  return db.prepare(`SELECT d.id, d.title, d.status, d.created, d.starts_at AS startsAt,
       (SELECT COUNT(*) FROM items i WHERE i.drop_id = d.id) AS items,
       (SELECT COUNT(*) FROM items i WHERE i.drop_id = d.id AND i.status = 'sold') AS sold
     FROM drops d WHERE d.seller_id = ? ORDER BY d.created DESC`).all(s.id);

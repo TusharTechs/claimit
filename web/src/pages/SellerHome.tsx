@@ -111,6 +111,9 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
   const [liveUrl, setLiveUrl] = useState('');
   const [hold, setHold] = useState(5);
   const [startsAt, setStartsAt] = useState(''); // datetime-local (Pro: schedule ahead)
+  const [isPro, setIsPro] = useState(false);
+  useEffect(() => { api.sellerSession().then((a) => setIsPro(a.pro)).catch(() => {}); }, []);
+  const localInput = (ms: number) => { const d = new Date(ms - new Date().getTimezoneOffset() * 60_000); return d.toISOString().slice(0, 16); };
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -144,8 +147,10 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
         <input className="input mt-3" placeholder="e.g. Sunday thrift drop — 20 pieces" value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={80} />
         <input className="input mt-2" placeholder="YouTube live link (optional)" value={liveUrl} onChange={(e) => setLiveUrl(e.target.value)} maxLength={300} />
         <label className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-ink-2">
-          <span>Schedule it for later <span className="rounded-full bg-sun-soft px-1.5 py-0.5 text-[11px] font-bold text-[#6b4600]">PRO</span><br /><span className="text-xs text-muted">Buyers get a countdown and a calendar invite</span></span>
-          <input type="datetime-local" className="rounded-lg border border-line bg-white px-2 py-1.5 text-ink" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} aria-label="Scheduled start (optional)" />
+          <span>Schedule it for later <span className="rounded-full bg-sun-soft px-1.5 py-0.5 text-[11px] font-bold text-[#6b4600]">PRO</span><br />
+            <span className="text-xs text-muted">{isPro ? 'Buyers get a countdown and a calendar invite' : <>Buyers get a countdown and a calendar invite. <Link to="/pricing" className="font-semibold underline">See Pro</Link></>}</span></span>
+          <input type="datetime-local" className="rounded-lg border border-line bg-white px-2 py-1.5 text-ink disabled:opacity-50" value={startsAt} onChange={(e) => setStartsAt(e.target.value)}
+            disabled={!isPro} min={localInput(Date.now() + 6 * 60_000)} max={localInput(Date.now() + 60 * 86_400_000)} aria-label="Scheduled start (optional, Pro)" />
         </label>
         <label className="mt-3 flex items-center justify-between gap-3 text-sm text-ink-2">
           <span>Winner gets this long to pay before the next person in line is promoted</span>
@@ -154,7 +159,7 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
           </select>
         </label>
         {err && <p className="mt-2 text-sm font-semibold text-hot-dark">{err}</p>}
-        <button className="btn mt-3 w-full bg-hot-dark py-3 text-white" disabled={busy || !title.trim()}>{busy ? <Spinner /> : 'Create drop room'}</button>
+        <button className="btn mt-3 w-full bg-hot-dark py-3 text-white" disabled={busy || !title.trim()}>{busy ? <Spinner /> : startsAt ? 'Schedule drop' : 'Create drop room'}</button>
       </form>
 
       <div className="mt-8">
@@ -169,7 +174,9 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
                   <div className="truncate font-semibold">{d.title}</div>
                   <div className="text-sm text-muted">{d.items} items · {d.sold} sold · {new Date(d.created).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</div>
                 </div>
-                <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${d.status === 'live' ? 'bg-hot-dark text-white' : 'bg-line text-ink-2'}`}>{d.status === 'live' ? 'LIVE' : 'ENDED'}</span>
+                {d.status === 'live' && d.startsAt && d.startsAt > Date.now()
+                  ? <span className="whitespace-nowrap rounded-full bg-sun-soft px-2.5 py-1 text-xs font-bold text-[#6b4600]">SOON · {new Date(d.startsAt).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</span>
+                  : <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${d.status === 'live' ? 'bg-hot-dark text-white' : 'bg-line text-ink-2'}`}>{d.status === 'live' ? 'LIVE' : 'ENDED'}</span>}
               </Link>
               {d.status === 'ended' && d.items > d.sold && (
                 <button className="btn shrink-0 bg-paper px-3 py-2 text-sm" title="New drop with the unsold items" disabled={again === d.id} onClick={async () => {
@@ -241,8 +248,8 @@ function ProTeam({ shop }: { shop: string }) {
       {paySheet}
       {daysLeft <= 5 && (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl bg-sun-soft px-3 py-2 text-sm">
-          <span className="flex-1"><b>Pro ends in {daysLeft} day{daysLeft === 1 ? '' : 's'}.</b> After that you're back on Free: co-hosts pause, nothing is lost.</span>
-          <button className="btn bg-ink px-4 py-1.5 text-sm text-white" onClick={() => setPayOpen(true)}>Renew</button>
+          <span className="flex-1"><b>{acct.paidPro ? 'Pro' : 'Your free trial'} ends in {daysLeft} day{daysLeft === 1 ? '' : 's'}.</b> After that you're back on Free: co-hosts pause, nothing is lost.</span>
+          <button className="btn bg-ink px-4 py-1.5 text-sm text-white" onClick={() => setPayOpen(true)}>{acct.paidPro ? 'Renew' : 'Keep Pro'}</button>
         </div>
       )}
       <div className="flex items-center gap-2">
@@ -348,11 +355,15 @@ function ProPaySheet({ open, onClose }: { open: boolean; onClose: () => void }) 
   const [b, setB] = useState<Awaited<ReturnType<typeof api.proBilling>> | null>(null);
   const [ref, setRef] = useState('');
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (open) api.proBilling().then(setB).catch(() => setB(null)); }, [open]);
+  const [loadErr, setLoadErr] = useState(false);
+  const loadBilling = () => { setLoadErr(false); api.proBilling().then(setB).catch(() => setLoadErr(true)); };
+  useEffect(() => { if (open) loadBilling(); }, [open]);
   const link = b?.link ? payLinkFor(b.link, b.price, 'USD', 'ClaimIt Pro') : null;
   return (
     <Sheet open={open} onClose={onClose} title="Get ClaimIt Pro">
-      {!b ? <Spinner className="my-6 size-6 text-hot" /> : !b.available ? (
+      {loadErr ? (
+        <div className="pb-4"><p className="text-ink-2">Couldn't load payment details.</p><button className="btn mt-3 bg-ink px-5 py-2.5 text-white" onClick={loadBilling}>Try again</button></div>
+      ) : !b ? <Spinner className="my-6 size-6 text-hot" /> : !b.available ? (
         <p className="pb-4 text-ink-2">Paid Pro opens soon. You'll keep every feature of Free in the meantime.</p>
       ) : b.pending ? (
         <div className="pb-4"><p className="font-semibold">Thanks! We're confirming your payment (ref {b.pending.ref}).</p><p className="mt-1 text-sm text-muted">Pro turns on as soon as it's confirmed, usually within a day.</p></div>

@@ -89,7 +89,8 @@ export function publicDrop(dropId: string): PublicDrop {
     id: d.id, title: d.title, shop: s.shop, sellerId: sellerUserId(s.id), channelId: d.channel_id,
     status: d.status, liveUrl: d.live_url, holdSeconds: holdSecondsFor(d.id), startsAt: d.starts_at ?? null,
     items: items.filter((i) => i.status !== 'draft').map(toItem),
-    state, drop: { status: d.status, current: d.current_item, v: now() }, // REST is current, so newer than any earlier write, demo: d.id === 'demo', currency: s.currency, trust: sellerTrust(s.id),
+    // REST is the current state, so its version is newer than any earlier metadata write.
+    state, drop: { status: d.status, current: d.current_item, v: now() }, demo: d.id === 'demo', currency: s.currency, trust: sellerTrust(s.id),
   };
 }
 

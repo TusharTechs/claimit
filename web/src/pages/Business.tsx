@@ -66,7 +66,7 @@ const BLOCKS: Block[] = [
     points: [
       'Built-in virality: every drop is shared to stories and WhatsApp. Buyers share their wins, and every recap says "Run fair drops with ClaimIt"',
       'A self-serve trial through the public demo room and practice drops',
-      'Seller-to-seller referrals: an invite link gives the new shop a 30-day trial, and the inviter a month of Pro after the new shop\'s first sale',
+      'Seller-to-seller referrals: an invite link gives the new shop a 30-day trial, and the inviter a month of Pro once the new shop has 3 independent paying customers and no disputes',
       'Seller communities and live-selling coaches, plus buyer share links that track which shares bring people in',
       'Every shop has a public page with its drops and followers, which is a link sellers put in their bio',
     ],
@@ -97,7 +97,7 @@ const BLOCKS: Block[] = [
     n: 5, title: 'Revenue streams', icon: BarChart3, area: 'lg:[grid-area:rs]', tone: 'bg-mint-soft',
     points: [
       ['Pro at $9 a month, flat, with 0% commission.', 'Live today: co-hosts (up to 5 helpers who confirm payments and drop items while you present), lifetime analytics (no-show rate, repeat buyers, time to pay, best hour) and scheduled drops with a countdown and calendar invites. Pro is paid through ClaimIt\'s own payment link with operator confirmation, and a card processor\'s webhook can replace that step later. Coming next: automatic payment confirmation through gateways, and a custom shop link.'],
-      ['Terms:', 'a 14-day free trial with no card (30 days for invited shops), then monthly. The first 100 shops are flagged as founding sellers with 50% off year one. Each referral that leads to a sale earns a month free.'],
+      ['Terms:', 'a 14-day free trial with no card (30 days for invited shops), then monthly. The first 100 shops are flagged as founding sellers with 50% off year one. Each referral earns a month free once the invited shop has 3 independent paying customers.'],
       ['What drives revenue:', 'sellers who run several drops a week, who need co-hosts and automation. That group is also the most active on the free tier.'],
       ['Later:', 'a team plan for agencies that run drops for several shops.'],
     ],
@@ -109,7 +109,7 @@ const BLOCKS: Block[] = [
 /** Acquisition cost per new Pro shop, by channel. LTV is $145 (or $97 for a founding shop). All inputs are assumptions. */
 const CAC: [string, string, string][] = [
   ['Buyer sees ClaimIt in a drop', '≈ $0: built into every drop and recap', '—'],
-  ['Seller invites seller', '≈ $1: one month of Pro costs about 10% of $9 to serve', '≈ 100–145 : 1'],
+  ['Seller invites seller', '≈ $1: one month of Pro costs about 10% of $9 to serve', '≈ 97–145 : 1'],
   ['Live-selling coach or community', '≈ $11–22: 20% of a first year ($4.50 founding / $9 standard)', '≈ 6.6–8.8 : 1'],
   ['Paid social ads (not planned at launch)', '≈ $40–60 (assumed)', '≈ 1.6–3.6 : 1'],
 ];

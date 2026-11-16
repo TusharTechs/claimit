@@ -97,7 +97,14 @@ function ProCta({ acct }: { acct: SellerAccount | null }) {
   if (acct.pro) {
     return <Link to="/sell" className="btn mt-7 w-full bg-white py-3.5 text-ink">You're on Pro{acct.proUntil ? ` until ${new Date(acct.proUntil).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : ''} · See your team</Link>;
   }
-  if (acct.trialUsed) return <div className="mt-7 rounded-2xl bg-white/10 p-3.5 text-center text-sm font-semibold">Your free trial has ended. Your shop is on Free, and nothing was lost. Paid Pro opens soon: leave your contact below.</div>;
+  if (acct.trialUsed) {
+    return (
+      <div className="mt-7">
+        <p className="text-center text-sm text-white/85">Your free trial has ended. Your shop is on Free, and nothing was lost.</p>
+        <Link to="/sell" className="btn mt-2 w-full bg-sun py-3.5 text-ink">Get Pro · ${acct.founding ? '4.50' : '9'}/month →</Link>
+      </div>
+    );
+  }
   return (
     <button className="btn mt-7 w-full bg-sun py-3.5 text-ink" disabled={busy} onClick={async () => {
       setBusy(true);

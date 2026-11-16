@@ -126,6 +126,10 @@ if (cfg.mode === 'mock' && cfg.metaKey) {
     'drop state is versioned: the newer "ended" state outranks a replay of the older "live" one');
 }
 await call('POST', `/api/seller/drops/${live2.id}/end`, {}, sh);
+// The public drop response keeps every field the room relies on (a stray comment once dropped these silently).
+const demo = (await call('GET', '/api/drops/demo')).json;
+check(demo.demo === true && typeof demo.currency === 'string' && !!demo.trust && typeof demo.drop?.v === 'number', 'public drop response includes demo flag, currency, trust and a versioned drop state');
+
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nAll checks passed: no double-claims under contention.');
 process.exit(failed ? 1 : 0);
 export {};

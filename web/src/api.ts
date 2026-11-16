@@ -13,7 +13,7 @@ export class ApiError extends Error {
 
 export interface SellerSession { id: string; key: string; name: string; shop: string; upi: string; currency?: string; payLink?: string | null; payNote?: string | null }
 export interface SellerAccount { role: 'owner' | 'cohost'; cohostName: string | null; pro: boolean; proUntil: number | null; trialUsed: boolean;
-  founding?: boolean; referred?: boolean; referrals?: number; proPrice?: number }
+  founding?: boolean; referred?: boolean; referrals?: number; proPrice?: number; paidPro?: boolean }
 export interface Cohost { id: string; name: string; created: number }
 export interface Insights {
   currency: string; drops: number; sold: number; revenue: number; rescuedAllTime: number; rescuedThisMonth: number; pro: boolean; coversPro?: boolean;
@@ -62,7 +62,7 @@ async function req<T>(method: string, path: string, body?: unknown, auth?: 'sell
   return json as T;
 }
 
-export interface SellerDropSummary { id: string; title: string; status: string; created: number; items: number; sold: number }
+export interface SellerDropSummary { id: string; title: string; status: string; created: number; items: number; sold: number; startsAt?: number | null }
 export interface SellerClaim {
   id: string; itemId: string; buyerId: string; buyerName: string; status: MyClaim['status'];
   seq: number; created: number; holdUntil: number | null; utr: string | null; paidAt: number | null; payingAt?: number | null;
