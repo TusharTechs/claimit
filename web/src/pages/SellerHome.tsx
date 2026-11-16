@@ -146,7 +146,7 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
           </select>
         </label>
         {err && <p className="mt-2 text-sm font-semibold text-hot-dark">{err}</p>}
-        <button className="btn mt-3 w-full bg-hot py-3 text-white" disabled={busy || !title.trim()}>{busy ? <Spinner /> : 'Create drop room'}</button>
+        <button className="btn mt-3 w-full bg-hot-dark py-3 text-white" disabled={busy || !title.trim()}>{busy ? <Spinner /> : 'Create drop room'}</button>
       </form>
 
       <div className="mt-8">
@@ -160,7 +160,7 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
                 <div className="truncate font-semibold">{d.title}</div>
                 <div className="text-sm text-muted">{d.items} items · {d.sold} sold · {new Date(d.created).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</div>
               </div>
-              <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${d.status === 'live' ? 'bg-hot text-white' : 'bg-line text-ink-2'}`}>{d.status === 'live' ? 'LIVE' : 'ENDED'}</span>
+              <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${d.status === 'live' ? 'bg-hot-dark text-white' : 'bg-line text-ink-2'}`}>{d.status === 'live' ? 'LIVE' : 'ENDED'}</span>
             </Link>
           ))}
         </div>

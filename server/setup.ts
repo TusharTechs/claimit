@@ -13,6 +13,6 @@ if (config.mode !== 'nexconn') {
   process.exit(1);
 }
 
-const result = await nexconn.configurePriorities([MSG.DROP, MSG.EVENT], [MSG.CHAT]);
+const result = await nexconn.configurePriorities([MSG.DROP, MSG.EVENT, MSG.SELLER_CHAT], [MSG.CHAT]);
 console.log(JSON.stringify(result, null, 2));
 console.log('Done. If either call returned an error code like 1009, enable that service in the Nexconn Console and re-run.');

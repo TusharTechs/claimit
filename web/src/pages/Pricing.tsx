@@ -59,7 +59,7 @@ export default function Pricing() {
               }}>
                 <label className="sr-only" htmlFor="pro-contact">Phone or email</label>
                 <input id="pro-contact" className="input !border-white/20 !bg-white/10 !text-white placeholder:!text-white/50" placeholder="Phone or email" value={contact} onChange={(e) => setContact(e.target.value)} maxLength={120} />
-                <button className="btn shrink-0 bg-hot px-5 text-white" disabled={busy || contact.trim().length < 6}>{busy ? <Spinner /> : 'Get early access'}</button>
+                <button className="btn shrink-0 bg-hot-dark px-5 text-white" disabled={busy || contact.trim().length < 6}>{busy ? <Spinner /> : 'Get early access'}</button>
               </form>
             )}
           </div>

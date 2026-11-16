@@ -275,6 +275,14 @@ app.delete('/api/seller/drops/:dropId/items/:itemId', h((req) => {
 
 app.post('/api/seller/drops/:dropId/items/:itemId/drop', h((req) => dropItem(ownDrop(req).d.id, String(req.params.itemId))));
 app.post('/api/seller/drops/:dropId/items/:itemId/close', h((req) => closeItem(ownDrop(req).d.id, String(req.params.itemId))));
+/** The shop replies to the room. Sent by the server as the shop, as a priority type, so it lands even when fan chat floods. */
+app.post('/api/seller/drops/:dropId/say', limit('say', 60, 60_000), h(async (req) => {
+  const { d, s } = ownDrop(req);
+  const text = str(req.body.text, 200, 'Message');
+  await nexconn.sendOpen(d.channel_id, sellerUserId(s.id), MSG.SELLER_CHAT, { text, name: s.shop }, 2);
+  return { ok: true };
+}));
+
 app.post('/api/seller/drops/:dropId/end', h((req) => endDrop(ownDrop(req).d.id)));
 
 app.post('/api/seller/claims/:claimId/confirm', h((req) => sellerConfirm(String(req.params.claimId), seller(req).id)));
@@ -512,6 +520,8 @@ app.post('/api/claims/:claimId/release', h((req) => {
 // events: user:connection_status, open_channel:pre_messaging, direct_channel:pre_messaging.
 
 const seenWebhookTypes = new Set<string>();
+const shopKnowsBuyer = (sellerId: string, buyerId: string) => !!db.prepare(`SELECT 1 FROM claims c JOIN drops d ON d.id = c.drop_id
+  WHERE d.seller_id = ? AND c.buyer_id = ? UNION SELECT 1 FROM follows WHERE seller_id = ? AND buyer_id = ? LIMIT 1`).get(sellerId, buyerId, sellerId, buyerId);
 const MAX_ITEMS_PER_DROP = 90;
 const PAY_SCAM = /([\w.\-]{2,}@[a-z][\w-]*(?:\.[\w-]+)*)|((?:paypal\.me|venmo\.com|cash\.app|wa\.me|gcash\.me)\/\S+)|(\$[A-Za-z][\w]{2,})|(\+?\d[\d\s().-]{6,}\d)/gi;
 /** Mask payment handles, emails and phone numbers (9+ digits, so sizes, prices and years stay readable). */
@@ -566,7 +576,10 @@ app.post('/api/nexconn/webhook', express.json({ limit: '1mb' }), (req, res) => {
     const fake = String(e.messageType ?? '').startsWith('CI:') && !from.startsWith('s_');
     // Buyer ids are visible in the public queue, so buyers may only DM shops: no "pay me instead" DMs to people in line.
     const buyerToBuyer = !!to && !from.startsWith('s_') && !to.startsWith('s_');
-    if (fake || buyerToBuyer) { logEvent('', fake ? 'spoof_blocked' : 'dm_blocked', from); return res.json({ pass: 0 }); }
+    // Anyone can open a shop, so a shop may only message buyers it has a real relationship with (they claimed in one of
+    // its drops, or follow it). A rogue "shop" can't send fake order cards to ids it scraped from someone else's queue.
+    const strangerShop = from.startsWith('s_') && from !== SYSTEM_USER && !!to && !to.startsWith('s_') && !shopKnowsBuyer(from.slice(2), to);
+    if (fake || buyerToBuyer || strangerShop) { logEvent('', fake ? 'spoof_blocked' : 'dm_blocked', from); return res.json({ pass: 0 }); }
     return res.json({ pass: 1 });
   }
   if (type.endsWith(':pre_messaging')) return res.json({ pass: 1 });

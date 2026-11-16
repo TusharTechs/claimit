@@ -56,6 +56,22 @@ const after = (await call('GET', `/api/drops/${drop.id}`)).json.state[item.id];
 check(after.holder?.id === byPos[0], 'releasing the winner promotes #1 in line');
 check(after.waitlist.length === byPos.length - 1 && after.v > st.v, 'waitlist shrank by one and the version advanced again');
 
+// Close vs. pay: once the holder says they paid, the seller can't pull the item out from under them.
+const holder2 = buyers.find((b) => b.id === after.holder?.id)!;
+const mine = (await call('GET', `/api/drops/${drop.id}/me`, undefined, { 'x-buyer-id': holder2.id, 'x-buyer-key': holder2.key })).json as Json[];
+const hc = mine.find((c) => c.itemId === item.id && c.status === 'holding')!;
+const paid = await call('POST', `/api/claims/${hc.id}/paid`, { utr: 'RACE', phone: '+14155550123', address: '1 Test Street, Testville', pincode: '94103' },
+  { 'x-buyer-id': holder2.id, 'x-buyer-key': holder2.key });
+check(paid.status === 200, 'holder can mark the item paid');
+const closePaying = await call('POST', `/api/seller/drops/${drop.id}/items/${item.id}/close`, {}, sh);
+check(closePaying.status === 409, 'closing an item whose buyer says they paid is refused');
+await call('POST', `/api/seller/claims/${hc.id}/confirm`, {}, sh);
+const sold = (await call('GET', `/api/drops/${drop.id}`)).json.state[item.id];
+check(sold.status === 'sold' && sold.holder?.id === holder2.id, 'seller confirms: sold to the promoted buyer');
+const closeSold = await call('POST', `/api/seller/drops/${drop.id}/items/${item.id}/close`, {}, sh);
+const redrop = await call('POST', `/api/seller/drops/${drop.id}/items/${item.id}/drop`, {}, sh);
+check(closeSold.status === 409 && redrop.status === 409, 'a sold item can be neither closed nor dropped again');
+
 await call('POST', `/api/seller/drops/${drop.id}/end`, {}, sh);
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nAll checks passed: no double-claims under contention.');
 process.exit(failed ? 1 : 0);

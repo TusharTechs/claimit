@@ -176,7 +176,7 @@ export default function Room() {
     const offCount = rt.onParticipants((channelId, n) => channelId === drop.channelId && setViewers(n));
     const offMsg = rt.onMessage((m: RtMessage) => {
       if (m.kind === 'open' && m.channelId === drop.channelId) {
-        if (m.type === MSG.CHAT) {
+        if (m.type === MSG.CHAT || (m.type === MSG.SELLER_CHAT && m.sender === drop.sellerId)) {
           const c = m.content as ChatContent;
           wanted.current.add(m.sender); resolvePeople();
           pushFeed({ id: m.id, kind: 'chat', sender: m.sender, text: c.text, fallbackName: c.name });
@@ -262,11 +262,13 @@ export default function Room() {
 
   const embed = embedUrl(drop.liveUrl);
   const curState = current ? state[current.id] : undefined;
-  const myClaim = current ? claims.find((c) => c.itemId === current.id && ['holding', 'paying', 'waiting', 'paid'].includes(c.status)) : undefined;
+  // Only this round's claim: the demo (and closed-then-redropped items) can bring an item back after you already bought it.
+  const myClaim = current ? claims.find((c) => c.itemId === current.id && ['holding', 'paying', 'waiting', 'paid'].includes(c.status)
+    && (c.created ?? 0) >= (current.droppedAt ?? 0)) : undefined;
   const sold = items.filter((i) => (state[i.id]?.status ?? i.status) === 'sold').length;
 
   return (
-    <div className="mx-auto flex h-dvh max-w-lg flex-col bg-paper">
+    <div className="mx-auto flex h-dvh max-w-lg flex-col bg-paper lg:max-w-6xl">
       {/* Top bar */}
       <header className="flex items-center gap-2.5 px-4 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))]">
         <div className="min-w-0 flex-1">
@@ -314,14 +316,16 @@ export default function Room() {
         )}
       </AnimatePresence>
 
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
+      {/* Phones: one column. Laptops: live video + item on the left, a chat rail with the claim bar on the right. */}
+      <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-5 lg:px-4 lg:pb-4">
+      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto lg:pb-4">
         {embed && (
           <div className="mx-4 mb-3 overflow-hidden rounded-2xl bg-ink">
             <iframe src={embed} title="Live video" className="aspect-video w-full" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen />
           </div>
         )}
 
-        <div className="px-4">
+        <div className="px-4 lg:mx-auto lg:max-w-2xl">
           {current ? (
             <ItemHero key={current.id} item={current} st={curState} me={me} compact={!!embed}
               isLatest={current.id === latestId && !ended} holdSeconds={drop.holdSeconds} />
@@ -363,11 +367,15 @@ export default function Room() {
           </div>
         )}
 
-        <Feed feed={feed} people={people} meId={me?.id} sellerId={drop.sellerId} />
+        <div className="lg:hidden"><Feed feed={feed} people={people} meId={me?.id} sellerId={drop.sellerId} /></div>
       </div>
 
+      <div className="flex shrink-0 flex-col lg:min-h-0 lg:overflow-hidden lg:rounded-[26px] lg:border lg:border-line lg:bg-card lg:shadow-[var(--shadow-card)]">
+      <div className="hidden px-4 pt-3 text-xs font-bold uppercase tracking-wider text-muted lg:block">Live room</div>
+      <div className="scroll-thin hidden min-h-0 flex-1 overflow-y-auto lg:block"><Feed feed={feed} people={people} meId={me?.id} sellerId={drop.sellerId} /></div>
+
       {/* Pinned action area: claim bar + chat. Always in thumb reach, never pushed below the fold. */}
-      <div className="border-t border-line bg-paper/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2.5 backdrop-blur">
+      <div className="border-t border-line bg-paper/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2.5 backdrop-blur lg:bg-card">
         {current && !ended && (<>
           <span className="sr-only" aria-live="assertive">{
             myClaim?.status === 'holding' ? `It's yours: ${current.name}. Pay to keep it.`
@@ -381,6 +389,8 @@ export default function Room() {
           const sent = await rt.sendOpen(drop.channelId, MSG.CHAT, { text, name: me.name });
           if (sent) pushFeed({ id: sent.id, kind: 'chat', sender: me.id, text, fallbackName: me.name });
         }} />
+      </div>
+      </div>
       </div>
 
       <Sheet open={ordersOpen} onClose={() => setOrdersOpen(false)} title="My orders">
@@ -653,7 +663,7 @@ function EndedCard({ shop, shopId, sold, total, toast }: { shop: string; shopId:
       <div className="mt-1 font-display text-3xl font-extrabold leading-tight">{shop} sold {sold} of {total}</div>
       <p className="mt-1 text-white/75">Fair and square — every claim was first-come, in front of everyone.</p>
       <div className="mt-4 flex flex-wrap gap-2">
-        <button className={`btn px-5 py-3 ${following ? 'bg-white/15 text-white' : 'bg-hot text-white'}`} disabled={following} onClick={async () => {
+        <button className={`btn px-5 py-3 ${following ? 'bg-white/15 text-white' : 'bg-hot-dark text-white'}`} disabled={following} onClick={async () => {
           try { await ensureBuyer(); await api.follow(shopId, true); setFollowing(true); celebrate({ x: 0.5, y: 0.4 }); toast(`You'll hear when ${shop} drops next`, 'mint'); }
           catch (e) { toast(e instanceof Error ? e.message : 'Could not follow', 'hot'); }
         }}>{following ? <><Check className="size-4" /> Following</> : `Follow ${shop} for the next drop`}</button>
@@ -695,7 +705,7 @@ function PaidExtras({ c, toast }: { c: MyClaim; toast: Toast }) {
     <div className="mt-3 rounded-2xl bg-ink p-4 text-white">
       <div className="font-display text-xl font-extrabold">That's the whole flow 🎉</div>
       <p className="mt-1 text-sm text-white/80">Claim → pay → confirmed, with a fair queue the whole room could see. Run the same thing for your followers, free.</p>
-      <Link to="/sell" className="btn mt-3 w-full bg-hot py-3 text-white">Start my own drop →</Link>
+      <Link to="/sell" className="btn mt-3 w-full bg-hot-dark py-3 text-white">Start my own drop →</Link>
     </div>
   );
   return (

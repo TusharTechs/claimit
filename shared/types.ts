@@ -7,6 +7,8 @@ export const MSG = {
   EVENT: 'CI:Event',
   /** Fan chatter in the live room. Registered as LOW-PRIORITY so it is shed first under load. */
   CHAT: 'CI:Chat',
+  /** The shop answering the room. A PRIORITY type (sent by our server as the shop), so it's never shed with fan chat. */
+  SELLER_CHAT: 'CI:SellerChat',
   /** Order card sent seller -> buyer in a 1:1 Direct channel. */
   ORDER: 'CI:Order',
   /** Order status update in the 1:1 Direct channel. */
@@ -14,7 +16,7 @@ export const MSG = {
   TEXT: 'RC:TxtMsg',
 } as const;
 
-export const CUSTOM_TYPES = [MSG.DROP, MSG.EVENT, MSG.CHAT, MSG.ORDER, MSG.ORDER_UPDATE];
+export const CUSTOM_TYPES = [MSG.DROP, MSG.EVENT, MSG.CHAT, MSG.SELLER_CHAT, MSG.ORDER, MSG.ORDER_UPDATE];
 
 export type ItemStatus = 'draft' | 'live' | 'held' | 'paying' | 'sold' | 'closed';
 export type ClaimStatus = 'holding' | 'waiting' | 'paying' | 'paid' | 'expired' | 'cancelled' | 'rejected';
@@ -124,6 +126,8 @@ export interface MyClaim {
   status: ClaimStatus;
   position: number; // 0 = holder, 1.. = waitlist position
   holdUntil: number | null;
+  /** When the claim was made: an item can be re-dropped, and an old round's claim must not count for the new one. */
+  created?: number;
   upi: string;
   shop: string;
   currency?: string;

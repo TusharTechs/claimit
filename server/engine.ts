@@ -98,7 +98,7 @@ export function myClaims(dropId: string, buyerId: string): MyClaim[] {
     if (c.status === 'waiting') position = q.activeClaims(c.item_id).filter((x) => x.status === 'waiting').findIndex((x) => x.id === c.id) + 1;
     return {
       id: c.id, itemId: c.item_id, itemName: c.item_name, price: c.price, image: imageUrl(c.image_id),
-      status: c.status, position, holdUntil: c.hold_until, upi: s.upi, shop: s.shop, currency: s.currency, payLink: s.pay_link, payNote: s.pay_note, demo: dropId === 'demo',
+      status: c.status, position, holdUntil: c.hold_until, created: (c as any).created, upi: s.upi, shop: s.shop, currency: s.currency, payLink: s.pay_link, payNote: s.pay_note, demo: dropId === 'demo',
       shippedAt: (c as any).shipped_at ?? null, tracking: (c as any).tracking ?? null,
     };
   });
@@ -128,11 +128,23 @@ async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
   }
 }
 
+/**
+ * Queue a metadata write. Writes are coalesced: while one is waiting in the channel's queue, later changes merge into it,
+ * and item state is read when the write actually runs, so a burst of 50 claims becomes one or two writes of the latest state.
+ */
+const pendingWrites = new Map<string, { ids: Set<string>; extra: Record<string, string> }>();
 function publish(dropId: string, itemIds: string[], extra: Record<string, string> = {}) {
   const d = q.drop(dropId)!;
-  const entries: Record<string, string> = { ...extra };
-  for (const id of itemIds) entries[itemKey(id)] = JSON.stringify(itemState(id));
-  return enqueue(d.channel_id, () => withRetry(() => nexconn.setMetadata(d.channel_id, sellerUserId(d.seller_id), entries)));
+  const pending = pendingWrites.get(d.channel_id);
+  if (pending) { itemIds.forEach((id) => pending.ids.add(id)); Object.assign(pending.extra, extra); return chains.get(d.channel_id); }
+  const batch = { ids: new Set(itemIds), extra: { ...extra } };
+  pendingWrites.set(d.channel_id, batch);
+  return enqueue(d.channel_id, () => {
+    pendingWrites.delete(d.channel_id); // from here on, new changes start a fresh write
+    const entries: Record<string, string> = { ...batch.extra };
+    for (const id of batch.ids) entries[itemKey(id)] = JSON.stringify(itemState(id));
+    return withRetry(() => nexconn.setMetadata(d.channel_id, sellerUserId(d.seller_id), entries));
+  });
 }
 
 /** Boot: republish every live drop's full state, so a write lost in a crash/restart can't leave a room stale. */
@@ -168,8 +180,11 @@ function sendOrder(claimId: string) {
     image: imageUrl(it.image_id), upi: s.upi, shop: s.shop, holdUntil: c.hold_until || now(), currency: s.currency, payLink: s.pay_link, payNote: s.pay_note,
   };
   return enqueue(`dm:${c.buyer_id}`, async () => {
-    const id = await nexconn.sendDirect(sellerUserId(s.id), c.buyer_id, MSG.ORDER, order,
-      `You got ${it.name}! Pay within ${fmtHold(holdSecondsFor(d.id))} to keep it.`, undefined, { s: 'holding' });
+    let id: string | null;
+    try {
+      id = await nexconn.sendDirect(sellerUserId(s.id), c.buyer_id, MSG.ORDER, order,
+        `You got ${it.name}! Pay within ${fmtHold(holdSecondsFor(d.id))} to keep it.`, undefined, { s: 'holding' });
+    } catch (e) { failedOrderCards.add(claimId); throw e; } // only a send that actually failed is ever resent
     if (id) db.prepare('UPDATE claims SET order_msg_id = ? WHERE id = ?').run(id, claimId);
     else console.warn('[order card] no messageId returned; live status updates disabled for claim', claimId);
   });
@@ -408,20 +423,18 @@ export function endDrop(dropId: string) {
   roomEvent(dropId, { kind: 'ended', text: 'This drop has ended. Thanks for shopping!' });
 }
 
-/** An order card whose send failed (no message id stored) is sent again once, so a winner is never left without checkout. */
+/** An order card whose send threw is sent again once (5s later), so a winner is never left without checkout. A send that
+ *  succeeded is never repeated, even if Nexconn's response carried no message id. */
+const failedOrderCards = new Set<string>();
 const resent = new Set<string>();
 function resendLostOrderCards() {
-  const lost = db.prepare(`SELECT id, buyer_id FROM claims WHERE status = 'holding' AND order_msg_id IS NULL AND hold_until > ? AND buyer_id NOT LIKE 'bot\\_%' ESCAPE '\\'`)
-    .all(now() + 30_000) as { id: string; buyer_id: string }[];
-  for (const c of lost) {
-    const at = firstSeenLost.get(c.id) ?? now();
-    firstSeenLost.set(c.id, at);
-    if (now() - at < 10_000 || resent.has(c.id)) continue;
-    resent.add(c.id);
-    sendOrder(c.id);
+  for (const id of [...failedOrderCards]) {
+    failedOrderCards.delete(id);
+    if (resent.has(id) || q.claim(id)?.status !== 'holding') continue;
+    resent.add(id);
+    setTimeout(() => { if (q.claim(id)?.status === 'holding') sendOrder(id); }, 5000);
   }
 }
-const firstSeenLost = new Map<string, number>();
 
 /** ClaimIt's own system sender for nudges to sellers (s_ prefix = trusted for CI:* messages; real seller ids are 10 chars). */
 export const SYSTEM_USER = 's_claimit';
@@ -462,7 +475,8 @@ export function startExpiryLoop() {
     remindSlowConfirms();
     resendLostOrderCards();
     for (const h of held) {
-      if (!presence.isOffline(h.buyer_id, 180_000)) continue;
+      // Same 10-minute rule as the waitlist: a winner who flipped back to the seller's Instagram/TikTok Live isn't "gone".
+      if (!presence.isOffline(h.buyer_id, 600_000)) continue;
       const others = q.activeClaims(h.item_id).some((x) => x.status === 'waiting');
       if (!others) continue;
       try { release(h.id, 'offline'); } catch (err) { console.error('offline release', err); }

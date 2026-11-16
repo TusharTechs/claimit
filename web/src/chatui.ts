@@ -71,11 +71,12 @@ class OrderBubble extends HTMLElement {
   }
 }
 
-/** Order cards are only ever sent by a shop (s_…). Unknown sender shape → trust (server webhook also blocks forgeries). */
+/** The seller's inbox only trusts order cards it sent itself (echoes) or ClaimIt's own nudges. Unknown sender shape →
+ *  trust (the server's direct_channel:pre_messaging webhook also blocks forgeries before delivery). */
 function fromShop(m: unknown) {
   const x = m as any;
   const id = x?.senderUserId ?? x?.senderId ?? x?.message?.senderUserId ?? x?.message?.senderId;
-  return typeof id !== 'string' || id.startsWith('s_');
+  return typeof id !== 'string' || id === rt.me || id === 's_claimit';
 }
 const FAKE = '<div style="font:13px Inter,system-ui,sans-serif;padding:8px 12px;border-radius:12px;background:#ffe6dc;color:#d93a10">⚠️ Hidden: a fake order message</div>';
 

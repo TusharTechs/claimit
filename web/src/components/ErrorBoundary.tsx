@@ -19,7 +19,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
         <div className="max-w-sm">
           <div className="font-display text-3xl font-extrabold">Oops — we hiccuped</div>
           <p className="mt-2 text-ink-2">Your claims are safe on the server. Reload to jump back into the drop.</p>
-          <button className="btn mt-5 bg-hot px-6 py-3 text-white" onClick={() => location.reload()}>Reload</button>
+          <button className="btn mt-5 bg-hot-dark px-6 py-3 text-white" onClick={() => location.reload()}>Reload</button>
         </div>
       </div>
     );

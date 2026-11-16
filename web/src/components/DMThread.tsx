@@ -46,7 +46,7 @@ export function DMThread({ peerId, peerName, onActivity, compact = false }: {
       <div className={`scroll-thin min-h-0 flex-1 space-y-2 overflow-y-auto ${compact ? 'max-h-72' : ''} py-2`}>
         {loading && <div className="py-6 text-center text-sm text-muted">Loading chat…</div>}
         {!loading && msgs.length === 0 && <div className="py-6 text-center text-sm text-muted">No messages with {peerName} yet.</div>}
-        {msgs.map((m) => <Bubble key={m.id} m={m} />)}
+        {msgs.map((m) => <Bubble key={m.id} m={m} peerId={peerId} />)}
         <div ref={endRef} />
       </div>
       <form className="mt-2 flex gap-2" onSubmit={(e) => { e.preventDefault(); send(); }}>
@@ -59,9 +59,11 @@ export function DMThread({ peerId, peerName, onActivity, compact = false }: {
   );
 }
 
-function Bubble({ m }: { m: RtMessage }) {
-  // Order cards are only ever sent by a shop (s_…); anything else claiming to be one is not shown as an order.
-  if ((m.type === MSG.ORDER || m.type === MSG.ORDER_UPDATE) && !m.sender.startsWith('s_')) {
+function Bubble({ m, peerId }: { m: RtMessage; peerId: string }) {
+  // Order cards only count when they come from the shop this thread is with (or ClaimIt itself, or yourself as that shop).
+  // Anyone else — another buyer, or a different "shop" — is shown as a fake.
+  const trusted = m.sender === peerId || m.sender === 's_claimit' || (m.mine && m.sender.startsWith('s_'));
+  if ((m.type === MSG.ORDER || m.type === MSG.ORDER_UPDATE) && !trusted) {
     return <div className="mx-auto max-w-xs rounded-xl bg-hot-soft px-3 py-2 text-center text-[13px] text-hot-dark">⚠️ Hidden: a fake order message</div>;
   }
   if (m.type === MSG.ORDER) {

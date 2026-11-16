@@ -66,7 +66,7 @@ export default function Shop() {
       </section>
 
       {live && (
-        <Link to={`/d/${live.id}`} className="mt-6 flex items-center gap-3 rounded-[22px] bg-hot p-3 pr-4 text-white shadow-[var(--shadow-pop)]">
+        <Link to={`/d/${live.id}`} className="mt-6 flex items-center gap-3 rounded-[22px] bg-hot-dark p-3 pr-4 text-white shadow-[var(--shadow-pop)]">
           <div className="size-16 shrink-0 overflow-hidden rounded-2xl bg-white/20"><ItemThumb name={live.title} image={live.cover} /></div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider"><span className="anim-live size-2 rounded-full bg-white" /> Live now</div>

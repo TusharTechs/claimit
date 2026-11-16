@@ -127,6 +127,7 @@ export const api = {
   shop: (sellerId: string) => req<Shop>('GET', `/api/shops/${sellerId}`, undefined, 'buyer'),
   follow: (sellerId: string, follow: boolean) => req<{ following: boolean; followers: number }>('POST', `/api/shops/${sellerId}/follow`, { follow }, 'buyer'),
   impact: () => req<Impact>('GET', '/api/impact'),
+  sellerSay: (dropId: string, text: string) => req('POST', `/api/seller/drops/${dropId}/say`, { text }, 'seller'),
   buyerOrders: () => req<BuyerOrders>('GET', '/api/buyer/orders', undefined, 'buyer'),
   proWaitlist: (contact: string) => req('POST', '/api/pro-waitlist', { contact }, 'seller'),
   feedback: (b: { role: 'buyer' | 'seller'; dropId?: string; rating?: number; text?: string; quoteOk?: boolean }) =>

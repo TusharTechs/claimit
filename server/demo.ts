@@ -59,6 +59,15 @@ async function nextRound() {
   const items = db.prepare('SELECT id FROM items WHERE drop_id = ? ORDER BY idx').all(DEMO_DROP) as { id: string }[];
   const idx = current ? (items.findIndex((i) => i.id === current) + 1) % items.length : 0;
   const itemId = items[idx].id;
+  // Close the previous item if nobody finished buying it, so it can't sit "live" behind the new one and take claims
+  // that would never be confirmed (and later be wiped when it cycles back).
+  if (current && current !== itemId) {
+    const prev = q.item(current);
+    if (prev && (prev.status === 'live' || prev.status === 'held')) {
+      const { closeItem } = await import('./engine.ts');
+      try { closeItem(DEMO_DROP, current); } catch { /* paying: the demo shop confirms it within seconds */ }
+    }
+  }
   // Reset the item: clear old bot / unfinished claims so it can be dropped again (a visitor's paid order is kept).
   db.prepare(`DELETE FROM claims WHERE item_id = ? AND (buyer_id LIKE 'bot\\_%' ESCAPE '\\' OR status != 'paid')`).run(itemId);
   db.prepare(`UPDATE items SET status = 'closed' WHERE id = ?`).run(itemId);

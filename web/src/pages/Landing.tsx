@@ -225,12 +225,15 @@ export default function Landing() {
           <div className="mx-auto max-w-6xl px-4 sm:px-6">
             <h2 className="font-display text-4xl font-extrabold sm:text-5xl">Comments vs. ClaimIt</h2>
             <div className="mt-8 overflow-hidden rounded-[26px] border border-white/10">
-              <div className="grid grid-cols-[1fr_1fr_1fr] bg-white/5 px-4 py-3 text-xs font-bold uppercase tracking-wider text-white/60 sm:px-6">
+              <div className="hidden grid-cols-[1fr_1fr_1fr] bg-white/5 px-4 py-3 text-xs font-bold uppercase tracking-wider text-white/60 sm:grid sm:px-6">
                 <span /> <span className="flex items-center gap-1.5"><X className="size-4 text-hot" />“Comment MINE”</span><span className="flex items-center gap-1.5"><LogoMark className="size-4" />ClaimIt</span>
               </div>
               {COMPARE.map(([q, a, b]) => (
-                <div key={q} className="grid grid-cols-[1fr_1fr_1fr] gap-3 border-t border-white/10 px-4 py-4 text-sm sm:px-6 sm:text-base">
-                  <span className="font-semibold">{q}</span><span className="text-white/60">{a}</span><span className="text-white">{b}</span>
+                <div key={q} className="grid gap-2 border-t border-white/10 px-4 py-4 text-sm first:border-t-0 sm:grid-cols-[1fr_1fr_1fr] sm:gap-3 sm:px-6 sm:text-base sm:first:border-t">
+                  <span className="font-semibold">{q}</span>
+                  {/* Phones: each row stacks as a card with labelled answers. */}
+                  <span className="flex items-start gap-2 text-white/60"><X className="mt-0.5 size-4 shrink-0 text-hot sm:hidden" aria-hidden /><span className="sr-only">Comment MINE: </span>{a}</span>
+                  <span className="flex items-start gap-2 text-white"><span className="sm:hidden"><LogoMark className="mt-0.5 size-4 shrink-0" /></span><span className="sr-only">ClaimIt: </span>{b}</span>
                 </div>
               ))}
             </div>

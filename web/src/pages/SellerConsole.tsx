@@ -77,7 +77,7 @@ export default function SellerConsole() {
     const offCount = rt.onParticipants((cid, n) => cid === channelId && setViewers(n));
     const offMsg = rt.onMessage((m: RtMessage) => {
       if (m.kind === 'open' && m.channelId === channelId) {
-        if (m.type === MSG.CHAT) {
+        if (m.type === MSG.CHAT || (m.type === MSG.SELLER_CHAT && m.sender === data?.drop.sellerId)) {
           const c = m.content as ChatContent;
           if (!m.mine) { wantedNames.current.add(m.sender); resolveNames(); }
           setFeed((f) => f.some((x) => x.id === m.id) ? f : [...f.slice(-120), { id: m.id, text: c.text, from: m.sender, mine: m.mine, kind: 'chat' }]);
@@ -274,8 +274,8 @@ export default function SellerConsole() {
               )}
               {tab === 'room' && channelId && (
                 <RoomReply onSend={async (text) => {
-                  const sent = await rt.sendOpen(channelId, MSG.CHAT, { text, name: drop.shop });
-                  if (sent) setFeed((f) => f.some((x) => x.id === sent.id) ? f : [...f.slice(-120), { id: sent.id, text, mine: true, kind: 'chat' }]);
+                  try { await api.sellerSay(dropId, text); } // arrives back via the room (echo) with its real message id
+                  catch (e) { toasts.push(e instanceof Error ? e.message : 'Could not send', 'hot'); }
                 }} />
               )}
               {tab === 'inbox' && chatUI && (
@@ -336,7 +336,7 @@ export default function SellerConsole() {
 
       {nextDraft && (
         <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center px-4 lg:justify-start lg:pl-[max(1rem,calc((100vw-72rem)/2+1rem))]">
-          <button className="btn anim-ring pointer-events-auto bg-hot px-6 py-3.5 text-white shadow-[var(--shadow-pop)]" onClick={() => dropNextRef.current()}>
+          <button className="btn anim-ring pointer-events-auto bg-hot-dark px-6 py-3.5 text-white shadow-[var(--shadow-pop)]" onClick={() => dropNextRef.current()}>
             <Play className="size-4 fill-current" /> Drop next: #{nextDraft.idx} {nextDraft.name.length > 28 ? nextDraft.name.slice(0, 27) + '…' : nextDraft.name}
             <kbd className="ml-1 hidden rounded-md bg-white/25 px-1.5 text-xs font-bold sm:inline">D</kbd>
           </button>
@@ -451,7 +451,7 @@ function ItemRow({ it, claims, ended, isNext, holdSeconds, onDrop, onClose, onDe
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           {(it.status === 'draft' || it.status === 'closed') && !ended && (
-            <button className={`btn px-4 py-2 text-sm ${isNext ? 'anim-ring bg-hot text-white' : 'border-2 border-hot text-hot-dark'}`} onClick={onDrop}>Drop now</button>
+            <button className={`btn px-4 py-2 text-sm ${isNext ? 'anim-ring bg-hot-dark text-white' : 'border-2 border-hot text-hot-dark'}`} onClick={onDrop}>Drop now</button>
           )}
           {it.status === 'draft' && <button className="text-xs font-semibold text-muted hover:text-hot-dark" onClick={onDelete}>Delete</button>}
           {it.status === 'live' && <button className="text-xs font-semibold text-muted hover:text-ink" onClick={onClose}>Close</button>}

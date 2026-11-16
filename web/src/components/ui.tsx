@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import confetti from 'canvas-confetti';
 import { toast } from 'sonner';
 import { Package, X } from 'lucide-react';
+import { AnimatePresence, motion, useDragControls } from 'motion/react';
 import { hueFor, initials } from '../util';
 
 /** ClaimIt mark: a "C" with a queue of dots and a check at the front of the line — first in line gets it. */
@@ -66,6 +67,7 @@ let sheetSeq = 0;
 
 export function Sheet({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode }) {
   const panel = useRef<HTMLDivElement>(null);
+  const drag = useDragControls();
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   useEffect(() => {
@@ -92,29 +94,39 @@ export function Sheet({ open, onClose, title, children }: { open: boolean; onClo
       prev?.focus?.();
     };
   }, [open]); // only on open/close — re-renders while open must never steal focus from inputs
-  if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" role="dialog" aria-modal aria-label={typeof title === 'string' ? title : undefined}>
-      <button className="absolute inset-0 bg-ink/45 backdrop-blur-[2px]" onClick={onClose} aria-label="Close" tabIndex={-1} />
-      <div ref={panel} className="anim-sheet relative flex max-h-[92dvh] w-full max-w-lg flex-col rounded-t-[28px] bg-paper shadow-2xl sm:rounded-[28px]">
-        <div className="mx-auto mt-2 h-1.5 w-10 rounded-full bg-line sm:hidden" aria-hidden />
-        <div className="flex items-center justify-between px-5 pb-2 pt-3">
-          <div className="font-display text-xl font-bold">{title}</div>
-          <button onClick={onClose} className="grid size-9 place-items-center rounded-full bg-line/60 text-ink-2 hover:bg-line" aria-label="Close">
-            <X className="size-4" strokeWidth={2.6} />
-          </button>
-        </div>
-        <div className="scroll-thin overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">{children}</div>
-      </div>
-    </div>
+    <AnimatePresence>
+      {open && (
+        <motion.div key="sheet" className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" role="dialog" aria-modal aria-label={typeof title === 'string' ? title : undefined}
+          initial={{ opacity: 1 }} exit={{ opacity: 1 }}>
+          <motion.button className="absolute inset-0 bg-ink/45 backdrop-blur-[2px]" onClick={onClose} aria-label="Close" tabIndex={-1}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }} />
+          {/* Swipe down on the handle/header (or anywhere at the top of the sheet) to dismiss, like a native bottom sheet. */}
+          <motion.div ref={panel} className="relative flex max-h-[92dvh] w-full max-w-lg flex-col rounded-t-[28px] bg-paper shadow-2xl sm:rounded-[28px]"
+            initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', stiffness: 380, damping: 36 }}
+            drag="y" dragListener={false} dragControls={drag} dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0, bottom: 0.6 }}
+            onDragEnd={(_, info) => { if (info.offset.y > 120 || info.velocity.y > 500) onClose(); }}>
+            <div className="cursor-grab touch-none active:cursor-grabbing" onPointerDown={(e) => drag.start(e)}>
+              <div className="mx-auto mt-2 h-1.5 w-10 rounded-full bg-line sm:hidden" aria-hidden />
+              <div className="flex items-center justify-between px-5 pb-2 pt-3">
+                <div className="font-display text-xl font-bold">{title}</div>
+                <button onClick={onClose} onPointerDown={(e) => e.stopPropagation()} className="grid size-9 place-items-center rounded-full bg-line/60 text-ink-2 hover:bg-line" aria-label="Close">
+                  <X className="size-4" strokeWidth={2.6} />
+                </button>
+              </div>
+            </div>
+            <div className="scroll-thin overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">{children}</div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 
-/** Styled replacement for window.confirm(). */
 export function ConfirmSheet({ open, title, body, confirmLabel, tone = 'hot', onConfirm, onClose }: {
   open: boolean; title: string; body: ReactNode; confirmLabel: string; tone?: 'hot' | 'ink' | 'mint'; onConfirm: () => void; onClose: () => void;
 }) {
-  const cls = { hot: 'bg-hot', ink: 'bg-ink', mint: 'bg-mint' }[tone];
+  const cls = { hot: 'bg-hot-dark', ink: 'bg-ink', mint: 'bg-mint' }[tone];
   return (
     <Sheet open={open} onClose={onClose} title={title}>
       <div className="text-ink-2">{body}</div>
