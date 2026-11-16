@@ -39,6 +39,12 @@ body {
 }
 .btn:active:not(:disabled) { transform: scale(0.97); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Tailwind v4 gives buttons the default arrow cursor; everything clickable here shows the hand pointer. */
+@layer base {
+  button:not(:disabled), [role="button"]:not([aria-disabled="true"]), [role="tab"], summary, select, label:has(input[type="radio"]), label:has(input[type="checkbox"]),
+  input[type="radio"], input[type="checkbox"], input[type="datetime-local"] { cursor: pointer; }
+  button:disabled, a[aria-disabled="true"] { cursor: not-allowed; }
+}
 
 .input {
   width: 100%; border-radius: 14px; border: 1.5px solid var(--color-line); background: white;

@@ -440,9 +440,12 @@ export function endDrop(dropId: string) {
 function clearEndedMetadata(dropId: string) {
   const d = q.drop(dropId);
   if (!d || d.status !== 'ended') return;
+  // Buyers can still pay for items held when the drop ended; their queue keeps updating until every hold settles.
+  const active = (db.prepare(`SELECT COUNT(*) AS n FROM claims WHERE drop_id = ? AND status IN ('holding','paying','waiting')`).get(dropId) as { n: number }).n;
+  if (active) return; // the periodic sweep tries again later
   const keys = q.items(dropId).map((i) => itemKey(i.id));
   enqueue(d.channel_id, async () => {
-    await nexconn.removeMetadata(d.channel_id, sellerUserId(d.seller_id), keys);
+    await withRetry(() => nexconn.removeMetadata(d.channel_id, sellerUserId(d.seller_id), keys));
     db.prepare('UPDATE drops SET meta_cleared = 1 WHERE id = ?').run(dropId);
   });
 }

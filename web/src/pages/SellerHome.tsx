@@ -148,7 +148,7 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
         <input className="input mt-2" placeholder="YouTube live link (optional)" value={liveUrl} onChange={(e) => setLiveUrl(e.target.value)} maxLength={300} />
         <label className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-ink-2">
           <span>Schedule it for later <span className="rounded-full bg-sun-soft px-1.5 py-0.5 text-[11px] font-bold text-[#6b4600]">PRO</span><br />
-            <span className="text-xs text-muted">{isPro ? 'Buyers get a countdown and a calendar invite' : <>Buyers get a countdown and a calendar invite. <Link to="/pricing" className="font-semibold underline">See Pro</Link></>}</span></span>
+            <span className="text-xs text-muted">{isPro ? 'Your local time. Buyers get a countdown in theirs, plus a calendar invite' : <>Buyers get a countdown and a calendar invite. <Link to="/pricing" className="font-semibold underline">See Pro</Link></>}</span></span>
           <input type="datetime-local" className="rounded-lg border border-line bg-white px-2 py-1.5 text-ink disabled:opacity-50" value={startsAt} onChange={(e) => setStartsAt(e.target.value)}
             disabled={!isPro} min={localInput(Date.now() + 6 * 60_000)} max={localInput(Date.now() + 60 * 86_400_000)} aria-label="Scheduled start (optional, Pro)" />
         </label>
@@ -193,14 +193,14 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
 
       {/* Returning sellers reach their drops first; value, team and invites follow. */}
       <ValueCard />
-      <ProTeam shop={seller.shop} />
+      <ProTeam shop={seller.shop} onAccount={(a) => setIsPro(a.pro)} />
       <InviteCard sellerId={seller.id} shop={seller.shop} />
     </div>
   );
 }
 
 /** Pro: a free 14-day trial and co-hosts (helpers who confirm payments and drop items from their own phone). */
-function ProTeam({ shop }: { shop: string }) {
+function ProTeam({ shop, onAccount }: { shop: string; onAccount?: (a: SellerAccount) => void }) {
   const [acct, setAcct] = useState<SellerAccount | null>(null);
   const [team, setTeam] = useState<Cohost[]>([]);
   const [name, setName] = useState('');
@@ -208,14 +208,29 @@ function ProTeam({ shop }: { shop: string }) {
   const [removing, setRemoving] = useState<Cohost | null>(null);
   const [payOpen, setPayOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  // Back from checkout (?pro=return): Pro turns on when the payment webhook lands, usually within seconds.
+  // ?pro=pay opens checkout straight away (from Pricing). ?pro=return is the way back from Dodo's checkout:
+  // read its status, and on success wait for the payment webhook to switch Pro on (usually seconds).
   useEffect(() => {
-    if (new URLSearchParams(location.search).get('pro') !== 'return') return;
+    const sp = new URLSearchParams(location.search);
+    const mode = sp.get('pro');
+    if (!mode) return;
     history.replaceState(null, '', location.pathname);
+    if (mode === 'pay') { setPayOpen(true); return; }
+    if (mode !== 'return') return;
+    const status = (sp.get('status') || '').toLowerCase();
+    if (['failed', 'cancelled', 'canceled', 'requires_payment_method'].includes(status)) {
+      toast.error('The payment didn\'t go through, so nothing was charged. You can try again.');
+      setPayOpen(true);
+      return;
+    }
     toast('Payment received — switching on Pro…');
+    const before = Date.now();
     let n = 0;
     const t = setInterval(async () => {
-      try { const a = await api.sellerSession(); if (a.pro) { clearInterval(t); setAcct(a); toast.success('Pro is on. Add your first co-host below.'); load(); } } catch { /* retry */ }
+      try {
+        const a = await api.sellerSession();
+        if (a.pro && a.paidPro) { clearInterval(t); toast.success(a.proUntil && a.proUntil - before > 31 * 86_400_000 ? 'Renewed: 30 more days of Pro added.' : 'Pro is on for 30 days.'); load(); }
+      } catch { /* retry */ }
       if (++n > 20) { clearInterval(t); toast("Still confirming your payment. Pro will switch on as soon as it does."); }
     }, 2000);
     return () => clearInterval(t);
@@ -225,6 +240,7 @@ function ProTeam({ shop }: { shop: string }) {
     try {
       const a = await api.sellerSession();
       setAcct(a);
+      onAccount?.(a);
       if (a.role === 'owner' && a.pro) setTeam(await api.cohosts());
     } catch { /* offline: hide the card */ }
   };
@@ -242,7 +258,7 @@ function ProTeam({ shop }: { shop: string }) {
         <Crown className="size-8 shrink-0 text-sun" />
         <div className="min-w-[14rem] flex-1">
           <div className="font-display text-xl font-bold">Go live with a co-host</div>
-          <p className="text-sm text-white/75">Pro lets a helper confirm payments and drop items from their own phone while you present. $9/month, 0% commission. The trial needs no card: after {trialDays} days you're simply back on Free.</p>
+          <p className="text-sm text-white/75">Pro lets a helper confirm payments and drop items from their own phone while you present. ${acct.proPrice ?? 9}/month, 0% commission. The trial needs no card: after {trialDays} days you're simply back on Free.</p>
           {acct.founding && <span className="mt-2 inline-block rounded-full bg-sun px-2.5 py-1 text-xs font-bold text-ink">Founding seller · 50% off Pro year one</span>}
         </div>
         {acct.trialUsed

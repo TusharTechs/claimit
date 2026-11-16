@@ -88,7 +88,8 @@ const BLOCKS: Block[] = [
     points: [
       ['Variable:', 'Nexconn messaging, which is priced per monthly active user (MAU). At launch, Nexconn\'s free plan covers the first 10,000 MAU, which is roughly 50 shops with about 200 buyers a month each. Confirm the current limit in the Console.'],
       ['Fixed:', 'one small VM and a domain. One Node process settled 200 simultaneous claims in about 40 ms in our race test.'],
-      ['Costs ClaimIt never has:', 'payment processing, holding funds, chargebacks or money-transmitter licensing, because buyers pay sellers directly.'],
+      ['Payment fees (Pro only):', 'Dodo Payments, as merchant of record, takes a fee on each Pro payment (assumed ≈ 4% + $0.40, so ≈ $0.76 on $9 and ≈ $0.58 on $4.50) and handles tax, refunds and chargebacks for it.'],
+      ['Costs ClaimIt never has:', 'processing or holding sellers\' sales money, or money-transmitter licensing, because buyers pay sellers directly.'],
       ['Key drivers:', 'MAU above the free plan, and support time. Both grow more slowly than revenue as sellers move to Pro.'],
     ],
     assume: 'Nexconn per-MAU price above the free plan is to be confirmed.',
@@ -96,22 +97,22 @@ const BLOCKS: Block[] = [
   {
     n: 5, title: 'Revenue streams', icon: BarChart3, area: 'lg:[grid-area:rs]', tone: 'bg-mint-soft',
     points: [
-      ['Pro at $9 a month, flat, with 0% commission.', 'Live today: co-hosts (up to 5 helpers who confirm payments and drop items while you present), lifetime analytics (no-show rate, repeat buyers, time to pay, best hour) and scheduled drops with a countdown and calendar invites. Pro is paid through ClaimIt\'s own payment link with operator confirmation, and a card processor\'s webhook can replace that step later. Coming next: automatic payment confirmation through gateways, and a custom shop link.'],
+      ['Pro at $9 a month, flat, with 0% commission.', 'Live today: co-hosts (up to 5 helpers who confirm payments and drop items while you present), lifetime analytics (no-show rate, repeat buyers, time to pay, best hour) and scheduled drops with a countdown and calendar invites. Pro is collected automatically: Dodo Payments (merchant of record) runs checkout and its signed webhook switches Pro on. Coming next: automatic payment confirmation through gateways, and a custom shop link.'],
       ['Terms:', 'a 14-day free trial with no card (30 days for invited shops), then monthly. The first 100 shops are founding sellers: $4.50 a month for their first year, then $9. Each referral earns a month free once the invited shop has 3 independent paying customers.'],
       ['What drives revenue:', 'sellers who run several drops a week, who need co-hosts and automation. That group is also the most active on the free tier.'],
       ['Later:', 'a team plan for agencies that run drops for several shops.'],
     ],
     live: [['Pricing', '/pricing']],
-    assume: 'Payment is collected through a link and confirmed by an operator, not yet by a card processor.',
+    assume: 'Pro is a 30-day pass bought again each month (renewals stack); a Dodo subscription product would make renewal automatic.',
   },
 ];
 
-/** Acquisition cost per new Pro shop, by channel. LTV is $145 (or $97 for a founding shop). All inputs are assumptions. */
+/** Acquisition cost per new Pro shop, by channel. LTV is ≈ $132 (≈ $86 for a founding shop) after payment fees. All inputs are assumptions. */
 const CAC: [string, string, string][] = [
   ['Buyer sees ClaimIt in a drop', '≈ $0: built into every drop and recap', '—'],
-  ['Seller invites seller', '≈ $1: one month of Pro costs about 10% of $9 to serve', '≈ 97–145 : 1'],
-  ['Live-selling coach or community', '≈ $11–22: 20% of a first year ($4.50 founding / $9 standard)', '≈ 6.6–8.8 : 1'],
-  ['Paid social ads (not planned at launch)', '≈ $40–60 (assumed)', '≈ 1.6–3.6 : 1'],
+  ['Seller invites seller', '≈ $1: one month of Pro costs about 10% of $9 to serve', '≈ 86–132 : 1'],
+  ['Live-selling coach or community', '≈ $11–22: 20% of a first year ($4.50 founding / $9 standard)', '≈ 6.1–8.0 : 1'],
+  ['Paid social ads (not planned at launch)', '≈ $40–60 (assumed)', '≈ 1.4–3.3 : 1'],
 ];
 
 export default function Business() {
@@ -168,12 +169,12 @@ export default function Business() {
               ))}
             </dl>
             <p className="mt-4 text-[15px] text-white/90">
-              <b>Break-even:</b> a Pro seller pays for itself as long as Nexconn's price is below <b>$9 ÷ 150 ≈ $0.06 per monthly active user</b>, plus a share of one small server.
+              <b>Break-even:</b> a Pro seller pays for itself as long as Nexconn's price is below <b>$8.24 ÷ 150 ≈ $0.05 per monthly active user</b> (the $9 after Dodo's fee), plus a share of one small server.
               Within the free plan (the first 10,000 MAU), each Pro seller is nearly all margin. And what the seller saves pays for Pro on its own: a <b>single sale rescued from a no-show</b> each month usually covers $9.
             </p>
             <p className="mt-3 text-[15px] text-white/90">
-              <b>LTV vs. acquisition cost:</b> at roughly 90% gross margin and an assumed 18-month lifetime, a Pro shop is worth about <b>$145</b> ($9 × 0.9 × 18).
-              A founding shop is worth about <b>$97</b> ($4.50 × 0.9 × 12 + $9 × 0.9 × 6). The 18 months is an assumption: tools sellers use every week tend to be sticky, and pilots will measure it.
+              <b>LTV vs. acquisition cost:</b> after Dodo's fee (≈ $0.76) and serving costs (≈ $0.90), a $9 month leaves about <b>$7.34</b> (≈ 82% margin).
+              Over an assumed 18-month lifetime a Pro shop is worth about <b>$132</b>. A founding shop ($4.50 → ≈ $3.47 net for 12 months, then $9) is worth about <b>$86</b>. The 18 months is an assumption: tools sellers use every week tend to be sticky, and pilots will measure it.
             </p>
             {/* Phones: one card per channel; wider screens: a table. */}
             <ul className="mt-3 space-y-2 sm:hidden">

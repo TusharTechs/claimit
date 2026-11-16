@@ -24,7 +24,9 @@ export default function Shop() {
   if (!shop) return <div className="grid min-h-full place-items-center"><Spinner className="size-8 text-hot" /></div>;
 
   const live = shop.drops.find((d) => d.status === 'live' && d.items > 0);
-  const past = shop.drops.filter((d) => d !== live);
+  // A scheduled drop that hasn't started is "upcoming", not a past drop with 0/0 sold.
+  const upcoming = shop.drops.filter((d) => d.status === 'live' && d !== live && d.startsAt && d.startsAt > Date.now());
+  const past = shop.drops.filter((d) => d !== live && !upcoming.includes(d) && (d.status === 'ended' || d.items > 0));
   const toggle = async () => {
     setBusy(true);
     try {
@@ -80,6 +82,22 @@ export default function Shop() {
           </div>
           <ChevronRight className="size-6" />
         </Link>
+      )}
+
+      {upcoming.length > 0 && (
+        <section className="mt-6">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-muted">Upcoming</h2>
+          <div className="mt-3 space-y-2">
+            {upcoming.map((d) => (
+              <Link key={d.id} to={`/d/${d.id}`} className="flex items-center gap-3 rounded-2xl bg-sun-soft p-4">
+                <span className="text-2xl">📅</span>
+                <div className="min-w-0 flex-1"><div className="truncate font-semibold">{d.title}</div>
+                  <div className="text-sm text-[#6b4600]">{new Date(d.startsAt!).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</div></div>
+                <span className="text-sm font-bold">Remind me →</span>
+              </Link>
+            ))}
+          </div>
+        </section>
       )}
 
       <section className={`mt-8 ${live && past.length === 0 ? 'hidden' : ''}`}>

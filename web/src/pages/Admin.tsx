@@ -33,7 +33,8 @@ export default function Admin() {
 
   const [busy, setBusy] = useState<string | null>(null);
   const [pending, setPending] = useState<{ id: string; question: string; run: () => Promise<unknown>; ok: string } | null>(null);
-  const act = (id: string, question: string, run: () => Promise<unknown>, ok: string) => { if (!busy) setPending({ id, question, run, ok }); };
+  const [busyLabel, setBusyLabel] = useState('');
+  const act = (id: string, question: string, run: () => Promise<unknown>, ok: string, label = '') => { if (!busy) { setBusyLabel(label); setPending({ id, question, run, ok }); } };
   const confirmPending = async () => {
     if (!pending) return;
     const p = pending;
@@ -58,9 +59,13 @@ export default function Admin() {
           </form>
         ) : !data ? <Spinner className="mt-10 size-8 text-hot" /> : (
           <>
-            <h1 className="mt-4 font-display text-4xl font-extrabold">Operator</h1>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <h1 className="flex-1 font-display text-4xl font-extrabold">Operator</h1>
+              <button className="btn bg-white px-4 py-2 text-sm shadow-sm" onClick={() => load()}>Refresh</button>
+              <button className="btn bg-white px-4 py-2 text-sm shadow-sm" onClick={() => { try { sessionStorage.removeItem('claimit.admin'); } catch { /* ignore */ } setKey(''); setDraft(''); setData(null); }}>Sign out</button>
+            </div>
             <h2 className="mt-6 font-display text-2xl font-extrabold">Pro payments</h2>
-            <p className="text-sm text-muted">Check the reference against ClaimIt's payment account, then confirm (adds 30 days, renewals stack).</p>
+            <p className="text-sm text-muted">Dodo Payments confirm themselves through the webhook and appear here as confirmed. Only manual payments (payment link + reference) wait for you: check the reference, then confirm (adds 30 days; renewals stack).</p>
             <ul className="mt-3 space-y-2">
               {data.payments.length === 0 && <li className="text-sm text-muted">No payments yet.</li>}
               {data.payments.map((p) => (
@@ -68,8 +73,8 @@ export default function Admin() {
                   <div className="min-w-0 flex-1"><div className="font-semibold">{p.shop} · ${p.amount}</div><div className="text-sm text-muted">ref {p.ref} · {when(p.created)}</div></div>
                   {p.status === 'pending' ? (
                     <div className="flex gap-2">
-                      <button className="btn bg-mint px-4 py-2 text-sm text-white" disabled={!!busy} onClick={() => act(p.id, `Confirm ${p.shop}'s payment (ref ${p.ref})? This adds 30 days of Pro.`, () => call('POST', `/api/admin/payments/${p.id}/decide`, { confirm: true }), `${p.shop}: Pro extended`)}>{busy === p.id ? <Spinner /> : 'Confirm'}</button>
-                      <button className="btn bg-paper px-4 py-2 text-sm" disabled={!!busy} onClick={() => act(p.id, `Reject ${p.shop}'s payment (ref ${p.ref})?`, () => call('POST', `/api/admin/payments/${p.id}/decide`, { confirm: false }), 'Rejected')}>Reject</button>
+                      <button className="btn bg-mint px-4 py-2 text-sm text-white" disabled={!!busy} onClick={() => act(p.id, `Confirm ${p.shop}'s payment (ref ${p.ref})? This adds 30 days of Pro.`, () => call('POST', `/api/admin/payments/${p.id}/decide`, { confirm: true }), `${p.shop}: Pro extended`, 'Confirm')}>{busy === p.id && busyLabel === 'Confirm' ? <Spinner /> : 'Confirm'}</button>
+                      <button className="btn bg-paper px-4 py-2 text-sm" disabled={!!busy} onClick={() => act(p.id, `Reject ${p.shop}'s payment (ref ${p.ref})?`, () => call('POST', `/api/admin/payments/${p.id}/decide`, { confirm: false }), 'Rejected', 'Reject')}>{busy && busyLabel === 'Reject' ? <Spinner /> : 'Reject'}</button>
                     </div>
                   ) : badge(p.status)}
                 </li>
@@ -85,8 +90,8 @@ export default function Admin() {
                   <div className="min-w-0 flex-1"><div className="font-semibold">{r.shop} · {REASON[r.reason] ?? r.reason}</div>{r.text && <div className="text-sm text-ink-2">{r.text}</div>}<div className="text-xs text-muted">{when(r.created)}</div></div>
                   {r.status === 'open' ? (
                     <div className="flex gap-2">
-                      <button className="btn bg-hot-dark px-4 py-2 text-sm text-white" disabled={!!busy} onClick={() => act(`${r.sellerId}-${r.buyerId}`, `Uphold this report? It will show on ${r.shop}'s trust line.`, () => call('POST', '/api/admin/reports/resolve', { sellerId: r.sellerId, buyerId: r.buyerId, status: 'upheld' }), 'Upheld')}>Uphold</button>
-                      <button className="btn bg-paper px-4 py-2 text-sm" disabled={!!busy} onClick={() => act(`${r.sellerId}-${r.buyerId}`, 'Dismiss this report? It will no longer count against the shop.', () => call('POST', '/api/admin/reports/resolve', { sellerId: r.sellerId, buyerId: r.buyerId, status: 'dismissed' }), 'Dismissed')}>Dismiss</button>
+                      <button className="btn bg-hot-dark px-4 py-2 text-sm text-white" disabled={!!busy} onClick={() => act(`${r.sellerId}-${r.buyerId}`, `Uphold this report? It will show on ${r.shop}'s trust line.`, () => call('POST', '/api/admin/reports/resolve', { sellerId: r.sellerId, buyerId: r.buyerId, status: 'upheld' }), 'Upheld', 'Uphold')}>{busy && busyLabel === 'Uphold' ? <Spinner /> : 'Uphold'}</button>
+                      <button className="btn bg-paper px-4 py-2 text-sm" disabled={!!busy} onClick={() => act(`${r.sellerId}-${r.buyerId}`, 'Dismiss this report? It will no longer count against the shop.', () => call('POST', '/api/admin/reports/resolve', { sellerId: r.sellerId, buyerId: r.buyerId, status: 'dismissed' }), 'Dismissed', 'Dismiss')}>{busy && busyLabel === 'Dismiss' ? <Spinner /> : 'Dismiss'}</button>
                     </div>
                   ) : badge(r.status)}
                 </li>

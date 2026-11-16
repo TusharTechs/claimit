@@ -118,6 +118,7 @@ addColumn('sellers', 'founding', 'INTEGER NOT NULL DEFAULT 0'); // first 100 sho
 addColumn('sellers', 'ref_by', 'TEXT'); // the shop that invited this one
 addColumn('sellers', 'ref_rewarded', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('drops', 'starts_at', 'INTEGER');
+addColumn('pro_payments', 'days', 'INTEGER NOT NULL DEFAULT 30'); // Pro days this payment granted (refunds take them back)
 addColumn('drops', 'meta_cleared', 'INTEGER NOT NULL DEFAULT 0'); // item metadata keys removed after the drop ended // scheduled start (Pro): buyers see a countdown and can add it to their calendar
 addColumn('shop_reports', 'status', "TEXT NOT NULL DEFAULT 'open'"); // open | upheld | dismissed (admin review) // account details (GCash number, bank account, Zelle email…)
 addColumn('drops', 'practice', 'INTEGER NOT NULL DEFAULT 0');

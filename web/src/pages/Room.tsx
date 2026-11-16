@@ -669,9 +669,10 @@ function Feed({ feed, people, meId, sellerId }: { feed: FeedEntry[]; people: Peo
 function ChatInput({ onSend, disabled, ended }: { onSend: (t: string) => Promise<void>; disabled: boolean; ended?: boolean }) {
   const [text, setText] = useState('');
   return (
-    <form className="flex gap-2" onSubmit={async (e) => { e.preventDefault(); const t = text.trim(); if (!t) return; setText(''); await onSend(t).catch(() => {
-      // Moderation refused it: repeated payment details pause your chat in this room (Nexconn native mute).
-      toast("Your message wasn't sent. Sharing payment details or phone numbers in the room pauses your chat here for a while.", { duration: 6000 });
+    <form className="flex gap-2" onSubmit={async (e) => { e.preventDefault(); const t = text.trim(); if (!t) return; setText(''); await onSend(t).catch((err) => {
+      // Moderation refused it (repeated payment details pause your chat in this room, Nexconn native mute) vs. a network issue.
+      if (err instanceof Error && err.message === 'NOT_SENT') toast("Your message wasn't sent. Sharing payment details or phone numbers in the room pauses your chat here for a while.", { duration: 6000 });
+      else toast.error("Couldn't send. Check your connection and try again.");
       setText(t);
     }); }}>
       <label className="sr-only" htmlFor="room-chat">Message the room</label>
@@ -975,6 +976,7 @@ function OrderCard({ c, buyerName, onChange, toast }: { c: MyClaim; buyerName: s
 function Scheduled({ drop }: { drop: PublicDrop }) {
   const left = useCountdown(drop.startsAt);
   const [following, setFollowing] = useState(false);
+  useEffect(() => { api.shop(shopIdOf(drop.sellerId)).then((s) => setFollowing(s.following)).catch(() => {}); }, [drop.sellerId]);
   const gcal = () => {
     const t = (ms: number) => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
     const q = new URLSearchParams({ action: 'TEMPLATE', text: `${drop.shop} live drop: ${drop.title}`, dates: `${t(drop.startsAt!)}/${t(drop.startsAt! + 3_600_000)}`,
@@ -1012,7 +1014,8 @@ function Scheduled({ drop }: { drop: PublicDrop }) {
         <a className="btn bg-ink px-4 py-2.5 text-sm text-white" href={gcal()} target="_blank" rel="noreferrer">Google Calendar</a>
         <button className="btn bg-white px-4 py-2.5 text-sm shadow-sm" onClick={ics}>Apple / Outlook (.ics)</button>
         <button className="btn bg-white px-4 py-2.5 text-sm shadow-sm" disabled={following} onClick={async () => {
-          try { await ensureBuyer(); await api.follow(shopIdOf(drop.sellerId), true); setFollowing(true); } catch { /* ignore */ }
+          try { await ensureBuyer(); await api.follow(shopIdOf(drop.sellerId), true); setFollowing(true); toast.success(`You'll hear when ${drop.shop} goes live`); }
+          catch { toast.error("Couldn't follow right now. Try again."); }
         }}>{following ? 'Following ✓' : `Follow ${drop.shop}`}</button>
       </div>
     </div>

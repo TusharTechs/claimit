@@ -180,7 +180,7 @@ app.post('/api/seller/session', h(async (req) => {
 app.post('/api/seller/pro/trial', h((req) => {
   const s = ownerOnly(req);
   if (isPro(s)) return { pro: true, proUntil: s.pro_until };
-  if (s.trial_used) throw new AppError(409, 'TRIAL_USED', 'Your free trial has been used. Pro billing opens soon.');
+  if (s.trial_used) throw new AppError(409, 'TRIAL_USED', 'Your free trial has been used. Tap "Get Pro" to keep Pro on.');
   const until = now() + (s.ref_by ? 30 : 14) * 86_400_000; // invited shops get a month
   db.prepare('UPDATE sellers SET pro_until = ?, trial_used = 1 WHERE id = ?').run(until, s.id);
   return { pro: true, proUntil: until };
@@ -242,17 +242,31 @@ app.post('/api/dodo/webhook', (req, res) => {
   });
   if (!ok) return res.status(401).json({ ok: false, error: 'bad_signature' });
 
-  const ev = req.body as { type?: string; data?: { payment_id?: string; total_amount?: number; metadata?: Record<string, string> } };
+  const ev = req.body as { type?: string; data?: { payment_id?: string; total_amount?: number; settlement_amount?: number; currency?: string; metadata?: Record<string, string> } };
   const sellerId = ev.data?.metadata?.sellerId;
-  if (ev.type === 'payment.succeeded' && sellerId && ev.data?.metadata?.kind === 'claimit_pro' && q.seller(sellerId)) {
+  const shop = sellerId ? (db.prepare(`SELECT ${SELLER_COLS} FROM sellers WHERE id = ?`).get(sellerId) as SellerAuth | undefined) : undefined;
+  if (ev.type === 'payment.succeeded' && shop && ev.data?.metadata?.kind === 'claimit_pro') {
     const payId = String(ev.data.payment_id || id);
+    // The checkout link is public, so the amount decides the time: the shop's own price buys 30 days, less buys
+    // proportionally less (e.g. a standard shop that pays the founding price gets 15 days).
+    const paidUsd = (ev.data.total_amount ?? 0) / 100;
+    const days = Math.max(0, Math.min(30, Math.floor((30 * paidUsd) / proPriceFor(shop) + 1e-9)));
     tx(() => {
       // Idempotent: Dodo may deliver the same event more than once.
       if (db.prepare('SELECT 1 FROM pro_payments WHERE id = ?').get(payId)) return;
-      db.prepare(`INSERT INTO pro_payments (id, seller_id, amount, ref, status, created, decided) VALUES (?, ?, ?, ?, 'confirmed', ?, ?)`)
-        .run(payId, sellerId, (ev.data!.total_amount ?? 0) / 100, `dodo${dodo().test ? ' (test)' : ''} ${payId}`, now(), now());
-      const cur = (db.prepare('SELECT pro_until FROM sellers WHERE id = ?').get(sellerId) as { pro_until: number | null }).pro_until ?? 0;
-      db.prepare('UPDATE sellers SET pro_until = ? WHERE id = ?').run(Math.max(now(), cur) + 30 * 86_400_000, sellerId);
+      db.prepare(`INSERT INTO pro_payments (id, seller_id, amount, ref, status, created, decided, days) VALUES (?, ?, ?, ?, 'confirmed', ?, ?, ?)`)
+        .run(payId, shop.id, paidUsd, `dodo${dodo().test ? ' (test)' : ''} ${payId}${days < 30 ? ` · ${days} days (partial amount)` : ''}`, now(), now(), days);
+      const cur = (db.prepare('SELECT pro_until FROM sellers WHERE id = ?').get(shop.id) as { pro_until: number | null }).pro_until ?? 0;
+      db.prepare('UPDATE sellers SET pro_until = ? WHERE id = ?').run(Math.max(now(), cur) + days * 86_400_000, shop.id);
+    });
+  }
+  // A refund or a chargeback takes back the Pro time that payment bought.
+  if (ev.type === 'refund.succeeded' || ev.type === 'dispute.opened') {
+    const payId = String(ev.data?.payment_id || '');
+    const p = db.prepare(`SELECT seller_id, days FROM pro_payments WHERE id = ? AND status = 'confirmed'`).get(payId) as { seller_id: string; days: number } | undefined;
+    if (p) tx(() => {
+      db.prepare(`UPDATE pro_payments SET status = ?, decided = ? WHERE id = ?`).run(ev.type === 'refund.succeeded' ? 'refunded' : 'disputed', now(), payId);
+      db.prepare('UPDATE sellers SET pro_until = MAX(?, COALESCE(pro_until, 0) - ?) WHERE id = ?').run(now() - 1, p.days * 86_400_000, p.seller_id);
     });
   }
   res.json({ ok: true });
@@ -645,7 +659,7 @@ app.get('/api/shops/:sellerId', h((req) => {
   const s = q.seller(String(req.params.sellerId));
   if (!s) throw new AppError(404, 'NO_SHOP', 'Shop not found');
   const b = optionalBuyer(req);
-  const drops = db.prepare(`SELECT d.id, d.title, d.status, d.created,
+  const drops = db.prepare(`SELECT d.id, d.title, d.status, d.created, d.starts_at AS startsAt,
       (SELECT COUNT(*) FROM items i WHERE i.drop_id = d.id AND i.status != 'draft') AS items,
       (SELECT COUNT(*) FROM items i WHERE i.drop_id = d.id AND i.status = 'sold') AS sold,
       (SELECT image_id FROM items i WHERE i.drop_id = d.id AND i.image_id IS NOT NULL ORDER BY i.idx LIMIT 1) AS cover
@@ -819,12 +833,29 @@ app.post('/api/claims/:claimId/release', h((req) => {
 // events: user:connection_status, open_channel:pre_messaging, direct_channel:pre_messaging.
 
 const seenWebhookTypes = new Set<string>();
+const seenNonces = new Map<string, number>(); // nonce -> expiry
 const shopKnowsBuyer = (sellerId: string, buyerId: string) => !!db.prepare(`SELECT 1 FROM claims c JOIN drops d ON d.id = c.drop_id
   WHERE d.seller_id = ? AND c.buyer_id = ? UNION SELECT 1 FROM follows WHERE seller_id = ? AND buyer_id = ? LIMIT 1`).get(sellerId, buyerId, sellerId, buyerId);
 const MAX_ITEMS_PER_DROP = 90;
 const PAY_SCAM = /([\w.\-]{2,}@[a-z][\w-]*(?:\.[\w-]+)*)|((?:paypal\.me|venmo\.com|cash\.app|wa\.me|gcash\.me)\/\S+)|(\$[A-Za-z][\w]{2,})|(\+?\d[\d\s().-]{6,}\d)/gi;
 /** Mask payment handles, emails and phone numbers (9+ digits, so sizes, prices and years stay readable). */
 const maskPay = (text: string) => text.replace(PAY_SCAM, (m, _e, _l, _t, phone) => (phone && m.replace(/\D/g, '').length < 9 ? m : '•••'));
+
+/** 1:1 messages run through this before Nexconn delivers them (and the mock transport uses the same rules). */
+export function moderateDirect(from: string, to: string, messageType: string) {
+  // Order cards and status lines (CI:*) may only come from a shop: a buyer can't forge "Payment confirmed".
+  // (A shop's server-sent cards may arrive without a recipient field, so those can't be failed closed here without
+  // risking every real order card; the relationship check below and the clients' own sender checks cover them.)
+  const fake = messageType.startsWith('CI:') && !from.startsWith('s_');
+  if (!to) logEvent('', 'dm_unchecked', from);
+  // Buyer ids are visible in the public queue, so buyers may only DM shops: no "pay me instead" DMs to people in line.
+  const buyerToBuyer = !!to && !from.startsWith('s_') && !to.startsWith('s_');
+  // Anyone can open a shop, so a shop may only message buyers it has a real relationship with (they claimed in one of
+  // its drops, or follow it). A rogue "shop" can't send fake order cards to ids it scraped from someone else's queue.
+  const strangerShop = from.startsWith('s_') && from !== SYSTEM_USER && !!to && !to.startsWith('s_') && !shopKnowsBuyer(from.slice(2), to);
+  if (fake || buyerToBuyer || strangerShop) { logEvent('', fake ? 'spoof_blocked' : 'dm_blocked', from); return { pass: 0 }; }
+  return { pass: 1 };
+}
 
 /** Room chat runs through this before Nexconn delivers it: mask off-platform payment details and stamp the real name. */
 export function moderateRoomChat(senderId: string, channelId: string, messageType: string, rawContent: string) {
@@ -868,6 +899,11 @@ app.post('/api/nexconn/webhook', express.json({ limit: '1mb' }), (req, res) => {
     return res.status(401).json({ error: 'bad signature' });
   }
   if (Math.abs(Date.now() - Number(ts)) > 5 * 60_000) return res.status(401).json({ error: 'stale' }); // replay protection
+  // Nexconn signs nonce+timestamp, not the body: remember nonces for the 5-minute window so captured headers can't be
+  // replayed with a forged body (e.g. fake presence events that would get a buyer skipped in line).
+  for (const [n, exp] of seenNonces) if (exp < Date.now()) seenNonces.delete(n);
+  if (seenNonces.has(nonce)) return res.status(401).json({ error: 'replayed' });
+  seenNonces.set(nonce, Date.now() + 5 * 60_000);
   const type = String(req.body?.type || '');
   if (!seenWebhookTypes.has(type)) { seenWebhookTypes.add(type); console.log('[webhook] first', type, JSON.stringify(req.body).slice(0, 400)); }
   const data: any[] = Array.isArray(req.body?.data) ? req.body.data : [];
@@ -880,22 +916,8 @@ app.post('/api/nexconn/webhook', express.json({ limit: '1mb' }), (req, res) => {
     return res.json(moderateRoomChat(String(e.userId), String(e.channelId), String(e.messageType), String(e.content ?? '')));
   }
   if (type === 'direct_channel:pre_messaging') {
-    // Order cards and status lines (CI:*) may only come from a shop: a buyer can't forge "Payment confirmed".
     const e = data[0] || {};
-    const from = String(e.userId ?? e.fromUserId ?? '');
-    const to = String(e.toUserId ?? e.targetId ?? e.channelId ?? '');
-    // Order cards from anyone but a shop are never delivered. (A shop's server-sent cards may arrive without a recipient
-    // field, so those can't be failed closed here without risking every real order card; the relationship check below
-    // and the clients' own sender checks cover them.)
-    const fake = String(e.messageType ?? '').startsWith('CI:') && !from.startsWith('s_');
-    if (!to) logEvent('', 'dm_unchecked', from);
-    // Buyer ids are visible in the public queue, so buyers may only DM shops: no "pay me instead" DMs to people in line.
-    const buyerToBuyer = !!to && !from.startsWith('s_') && !to.startsWith('s_');
-    // Anyone can open a shop, so a shop may only message buyers it has a real relationship with (they claimed in one of
-    // its drops, or follow it). A rogue "shop" can't send fake order cards to ids it scraped from someone else's queue.
-    const strangerShop = from.startsWith('s_') && from !== SYSTEM_USER && !!to && !to.startsWith('s_') && !shopKnowsBuyer(from.slice(2), to);
-    if (fake || buyerToBuyer || strangerShop) { logEvent('', fake ? 'spoof_blocked' : 'dm_blocked', from); return res.json({ pass: 0 }); }
-    return res.json({ pass: 1 });
+    return res.json(moderateDirect(String(e.userId ?? e.fromUserId ?? ''), String(e.toUserId ?? e.targetId ?? e.channelId ?? ''), String(e.messageType ?? '')));
   }
   if (type.endsWith(':pre_messaging')) return res.json({ pass: 1 });
   res.json({ ok: true });
@@ -1000,9 +1022,11 @@ if (config.mode === 'mock') {
     const content = verdict.replaceContent ? JSON.parse(verdict.replaceContent) : req.body.content;
     return { messageId: mockbus.sendOpen(channelId, mockUser(req), type, content) };
   }));
-  app.post('/api/mock/send-direct', h((req) => ({
-    messageId: mockbus.sendDirect(mockUser(req), str(req.body.to, 64, 'to'), str(req.body.type, 32, 'type'), req.body.content),
-  })));
+  app.post('/api/mock/send-direct', h((req) => {
+    const from = mockUser(req), to = str(req.body.to, 64, 'to'), type = str(req.body.type, 32, 'type');
+    if (!moderateDirect(from, to, type).pass) return { blocked: true }; // same rules as the direct pre-message webhook
+    return { messageId: mockbus.sendDirect(from, to, type, req.body.content) };
+  }));
   app.get('/api/mock/history', h((req) => mockbus.history(mockUser(req), String(req.query.peer || ''))));
   app.get('/api/mock/peers', h((req) => mockbus.peers(mockUser(req))));
   app.get('/api/mock/metadata', h((req) => mockbus.getMetadata(String(req.query.channelId || ''))));
@@ -1061,6 +1085,7 @@ setInterval(() => {
   for (const { id } of db.prepare(`SELECT id FROM sellers WHERE ref_by IS NOT NULL AND ref_rewarded = 0`).all() as { id: string }[]) rewardReferrer(id);
 }, 3600_000).unref?.();
 setTimeout(() => console.log(`[boot] republished ${republishLive()} live drop(s), cleared metadata of ${sweepEndedMetadata()} ended drop(s)`), 1500);
+setInterval(() => sweepEndedMetadata(), 10 * 60_000).unref?.();
 import('./demo.ts').then((m) => m.startDemo()).catch((e) => console.error('[demo] failed to start', e));
 app.listen(config.port, () => {
   console.log(`ClaimIt server on http://localhost:${config.port} (mode: ${config.mode}${config.mode === 'nexconn' ? `, area ${config.nexconn.area}` : ''})`);

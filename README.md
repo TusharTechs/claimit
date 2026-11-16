@@ -61,7 +61,7 @@ The full Business Model Canvas, unit economics and impact are in the app at `/bu
   - lifetime analytics: no-show rate, repeat buyers, time to pay and best hour
   - scheduled drops, with a countdown and calendar invites
 
-  The first 100 shops are founding sellers at $4.50. Shops pay through ClaimIt's own payment link (`PRO_PAY_LINK` / `PRO_PAY_NOTE`) and submit a reference. An operator confirms it at `/admin`, which adds 30 days; renewals stack, and Pro lapses back to Free with nothing lost. A card processor's webhook can replace the operator step without other changes.
+  The first 100 shops are founding sellers at $4.50. Shops pay through Dodo Payments: a checkout tagged with the shop id, and a signed `payment.succeeded` webhook adds 30 days automatically, but only if the amount covers the shop's price (refunds and disputes take the time back). Without Dodo configured, shops can pay ClaimIt's own payment link (`PRO_PAY_LINK` / `PRO_PAY_NOTE`) and submit a reference. An operator confirms it at `/admin`, which adds 30 days; renewals stack, and Pro lapses back to Free with nothing lost. A card processor's webhook can replace the operator step without other changes.
 - **Measurable value:** every drop recap and the seller home show sales rescued from no-shows (expired holds only) and races settled.
 - **Channels:**
   - Seller-to-seller invite links: the invited shop gets 30 days of Pro, and the inviter gets a month after the invited shop's first sale.

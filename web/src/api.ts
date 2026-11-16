@@ -77,7 +77,7 @@ export interface SellerDrop {
     recovered: number; recoveredItems: number; contested: number; avgConfirmSec: number };
 }
 
-export interface ShopDrop { id: string; title: string; status: 'live' | 'ended'; created: number; items: number; sold: number; cover: string | null }
+export interface ShopDrop { id: string; title: string; status: 'live' | 'ended'; created: number; items: number; sold: number; cover: string | null; startsAt?: number | null }
 export interface Shop { id: string; shop: string; name: string; followers: number; orders: number; since: number; avgConfirmSec?: number | null; rejectedPct?: number; reports?: number; reportsUnderReview?: number; following: boolean; drops: ShopDrop[] }
 export interface Impact {
   sellers: number; drops: number; buyers: number; claimsSettled: number; contestedItems: number; itemsSold: number; gmvUsd: number;

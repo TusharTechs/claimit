@@ -133,7 +133,12 @@ if (cfg.mode === 'mock') {
   const say = async (text: string) => (await call('POST', '/api/mock/send-open', { channelId: `drop_${scamDrop.id}`, type: 'CI:Chat', content: { text, name: 'x' } }, { 'x-mock-token': `mock:${b9.id}` })).json;
   for (const t of ['pay me at scam@okaxis', 'or venmo.com/u/scammer', 'call +1 415 555 0199']) await say(t);
   const fourth = await say('is this still available?');
-  check(fourth.blocked === true, 'after 3 payment-detail attempts the buyer is muted in that room (native mute)');
+  check(fourth.blocked === true && fourth.reason === 'muted', 'after 3 payment-detail attempts the buyer is muted in that room (native mute)');
+  // Direct messages: a buyer can't DM another buyer (people in line), nor send an order card.
+  const b10 = buyers[21]!;
+  const dm = async (to: string, type: string) => (await call('POST', '/api/mock/send-direct', { to, type, content: { text: 'pay me here instead' } }, { 'x-mock-token': `mock:${b9.id}` })).json;
+  check((await dm(b10.id, 'CI:Text')).blocked === true, 'a buyer cannot DM another buyer');
+  check((await dm(`s_${s.id}`, 'CI:Order')).blocked === true, 'a buyer cannot send a fake order card to a shop');
   await call('POST', `/api/seller/drops/${scamDrop.id}/end`, {}, sh);
 }
 

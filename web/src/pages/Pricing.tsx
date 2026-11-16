@@ -59,7 +59,7 @@ export default function Pricing() {
             ))}</ul>
             <ProCta acct={acct} />
             {!(acct?.pro || acct?.role === 'cohost') && <>
-            <p className="mt-5 text-sm font-semibold text-white/80">Get told when automatic payment confirmation launches:</p>
+            <p className="mt-5 text-sm font-semibold text-white/80">Get told when auto-confirming your buyers' payments (through payment gateways) launches:</p>
             {done ? (
               <div className="mt-2 rounded-2xl bg-white/10 p-4 text-center font-semibold">You're on the list 🎉 We'll tell you when it launches.</div>
             ) : (
@@ -94,6 +94,14 @@ function ProCta({ acct }: { acct: SellerAccount | null }) {
   }
   if (!acct) return <div className="btn mt-7 w-full bg-white/10 py-3.5 text-white/70"><Spinner /></div>;
   if (acct.role === 'cohost') return <div className="mt-7 rounded-2xl bg-white/10 p-3.5 text-center text-sm font-semibold">You're a co-host. The shop owner manages the plan.</div>;
+  if (acct.pro && !acct.paidPro && acct.trialUsed) {
+    return (
+      <div className="mt-7 space-y-2">
+        <Link to="/sell?pro=pay" className="btn w-full bg-sun py-3.5 text-ink">Keep Pro after the trial · ${acct.proPrice ?? 9}/month</Link>
+        <p className="text-center text-sm text-white/80">Trial ends {acct.proUntil ? new Date(acct.proUntil).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : 'soon'}. If you don't pay, you're simply back on Free.</p>
+      </div>
+    );
+  }
   if (acct.pro) {
     return <Link to="/sell" className="btn mt-7 w-full bg-white py-3.5 text-ink">You're on Pro{acct.proUntil ? ` until ${new Date(acct.proUntil).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : ''} · See your team</Link>;
   }
@@ -101,7 +109,7 @@ function ProCta({ acct }: { acct: SellerAccount | null }) {
     return (
       <div className="mt-7">
         <p className="text-center text-sm text-white/85">Your free trial has ended. Your shop is on Free, and nothing was lost.</p>
-        <Link to="/sell" className="btn mt-2 w-full bg-sun py-3.5 text-ink">Get Pro · ${acct.founding ? '4.50' : '9'}/month →</Link>
+        <Link to="/sell?pro=pay" className="btn mt-2 w-full bg-sun py-3.5 text-ink">Get Pro · ${acct.founding ? '4.50' : '9'}/month →</Link>
       </div>
     );
   }

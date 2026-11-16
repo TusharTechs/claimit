@@ -32,7 +32,9 @@ export async function openSealed(channelId: string, k: string, value: string | n
 }
 
 const statusCache = new Map<string, Promise<boolean>>();
-const newest = new Map<string, number>(); // claimId -> time of the newest verified status seen
+const NEWEST_KEY = 'claimit.orderStatus';
+const newest = new Map<string, number>(((): [string, number][] => { try { return Object.entries(JSON.parse(localStorage.getItem(NEWEST_KEY) || '{}')); } catch { return []; } })());
+const saveNewest = () => { try { localStorage.setItem(NEWEST_KEY, JSON.stringify(Object.fromEntries([...newest].slice(-300)))); } catch { /* private mode */ } };
 /**
  * True if this order-card status was set by the server (not by a client editing its own message's metadata) AND is not
  * older than a status already seen for this claim — so a buyer can't roll "shipped" back to an earlier, also-signed state.
@@ -45,6 +47,6 @@ export async function verifyOrderStatus(claimId: string, status: string | undefi
   if (!(await statusCache.get(ck))) { statusCache.delete(ck); return false; } // don't pin a failure (e.g. key not loaded yet)
   const time = Number(t ?? 0);
   if (time < (newest.get(claimId) ?? 0)) return false;
-  newest.set(claimId, time);
+  if (time > (newest.get(claimId) ?? 0)) { newest.set(claimId, time); saveNewest(); }
   return true;
 }
