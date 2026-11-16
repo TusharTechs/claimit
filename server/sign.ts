@@ -25,5 +25,5 @@ const sign = (data: string) => crypto.sign('sha256', Buffer.from(data), { key: p
 /** A metadata value bound to its channel and key, so a signed value can't be replayed into another item or room. */
 export const seal = (channelId: string, key: string, json: string) => JSON.stringify({ d: json, g: sign(`${channelId}|${key}|${json}`) });
 
-/** Signature for an order card's live status, bound to the claim. */
-export const signStatus = (claimId: string, status: string) => sign(`order|${claimId}|${status}`);
+/** Signature for an order card's live status, bound to the claim and its time (clients keep only the newest). */
+export const signStatus = (claimId: string, status: string, t: string) => sign(`order|${claimId}|${status}|${t}`);

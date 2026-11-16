@@ -96,14 +96,22 @@ const BLOCKS: Block[] = [
   {
     n: 5, title: 'Revenue streams', icon: BarChart3, area: 'lg:[grid-area:rs]', tone: 'bg-mint-soft',
     points: [
-      ['Pro at $9 a month, flat, with 0% commission.', 'Live today: co-hosts (up to 5 helpers who confirm payments and drop items while you present) and lifetime analytics (no-show rate, repeat buyers, time to pay, best hour). Coming next: automatic payment confirmation through gateways, and a custom shop link.'],
+      ['Pro at $9 a month, flat, with 0% commission.', 'Live today: co-hosts (up to 5 helpers who confirm payments and drop items while you present), lifetime analytics (no-show rate, repeat buyers, time to pay, best hour) and scheduled drops with a countdown and calendar invites. Pro is paid through ClaimIt\'s own payment link with operator confirmation, and a card processor\'s webhook can replace that step later. Coming next: automatic payment confirmation through gateways, and a custom shop link.'],
       ['Terms:', 'a 14-day free trial with no card (30 days for invited shops), then monthly. The first 100 shops are flagged as founding sellers with 50% off year one. Each referral that leads to a sale earns a month free.'],
       ['What drives revenue:', 'sellers who run several drops a week, who need co-hosts and automation. That group is also the most active on the free tier.'],
       ['Later:', 'a team plan for agencies that run drops for several shops.'],
     ],
     live: [['Pricing', '/pricing']],
-    assume: 'Billing is not switched on yet: the trial and Pro checks are live, and payment collection comes next.',
+    assume: 'Payment is collected through a link and confirmed by an operator, not yet by a card processor.',
   },
+];
+
+/** Acquisition cost per new Pro shop, by channel. LTV is $145 (or $97 for a founding shop). All inputs are assumptions. */
+const CAC: [string, string, string][] = [
+  ['Buyer sees ClaimIt in a drop', '≈ $0: built into every drop and recap', '—'],
+  ['Seller invites seller', '≈ $1: one month of Pro costs about 10% of $9 to serve', '≈ 100–145 : 1'],
+  ['Live-selling coach or community', '≈ $11–22: 20% of a first year ($4.50 founding / $9 standard)', '≈ 6.6–8.8 : 1'],
+  ['Paid social ads (not planned at launch)', '≈ $40–60 (assumed)', '≈ 1.6–3.6 : 1'],
 ];
 
 export default function Business() {
@@ -165,14 +173,20 @@ export default function Business() {
             </p>
             <p className="mt-3 text-[15px] text-white/90">
               <b>LTV vs. acquisition cost:</b> at roughly 90% gross margin and an assumed 18-month lifetime, a Pro shop is worth about <b>$145</b> ($9 × 0.9 × 18).
+              A founding shop is worth about <b>$97</b> ($4.50 × 0.9 × 12 + $9 × 0.9 × 6). The 18 months is an assumption: tools sellers use every week tend to be sticky, and pilots will measure it.
             </p>
-            <table className="mt-3 w-full text-left text-sm">
-              <thead className="text-white/70"><tr><th className="py-1 font-semibold">Channel</th><th className="font-semibold">Cost per new Pro shop (assumed)</th><th className="font-semibold">LTV : CAC</th></tr></thead>
+            {/* Phones: one card per channel; wider screens: a table. */}
+            <ul className="mt-3 space-y-2 sm:hidden">
+              {CAC.map(([ch, cost, ratio]) => (
+                <li key={ch} className="rounded-xl bg-white/10 p-3 text-sm"><div className="font-semibold">{ch}</div><div className="text-white/85">{cost}</div><div className="mt-0.5 font-bold">LTV : CAC {ratio}</div></li>
+              ))}
+            </ul>
+            <table className="mt-3 hidden w-full text-left text-sm sm:table">
+              <thead className="text-white/70"><tr><th scope="col" className="py-1 font-semibold">Channel</th><th scope="col" className="font-semibold">Cost per new Pro shop (assumed)</th><th scope="col" className="whitespace-nowrap font-semibold">LTV : CAC</th></tr></thead>
               <tbody className="text-white">
-                <tr className="border-t border-white/15"><td className="py-1.5">Buyer sees ClaimIt in a drop</td><td>≈ $0 (built into every drop and recap)</td><td>—</td></tr>
-                <tr className="border-t border-white/15"><td className="py-1.5">Seller invites seller</td><td>≈ $1: one month of Pro costs about 10% of $9 to serve</td><td>≈ 145 : 1</td></tr>
-                <tr className="border-t border-white/15"><td className="py-1.5">Live-selling coach or community</td><td>≈ $22: 20% of a first year at the founding price</td><td>≈ 6.6 : 1</td></tr>
-                <tr className="border-t border-white/15"><td className="py-1.5">Paid social ads (not planned at launch)</td><td>≈ $40–60 (typical small-business SaaS)</td><td>≈ 2.5–3.6 : 1</td></tr>
+                {CAC.map(([ch, cost, ratio]) => (
+                  <tr key={ch} className="border-t border-white/15"><td className="py-1.5 pr-3">{ch}</td><td className="pr-3">{cost}</td><td className="whitespace-nowrap">{ratio}</td></tr>
+                ))}
               </tbody>
             </table>
             <p className="mt-2 text-xs text-white/70">A blended acquisition cost under $25 keeps LTV : CAC above 5 : 1. Every figure here is an assumption until pilot shops report real numbers.</p>

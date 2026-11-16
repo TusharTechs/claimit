@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Flag } from 'lucide-react';
-import { api } from '../api';
+import { api, ApiError } from '../api';
 import { ensureBuyer } from '../buyer';
 import { Sheet, Spinner } from './ui';
 
@@ -16,13 +16,14 @@ export function ReportShop({ sellerId, shop, className = '' }: { sellerId: strin
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState('no_item');
   const [text, setText] = useState('');
-  const [state, setState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle');
+  const [state, setState] = useState<'idle' | 'busy' | 'done' | 'error' | 'blocked'>('idle');
+  const [msg, setMsg] = useState('');
   return (
     <>
       <button className={`inline-flex items-center gap-1.5 text-sm font-semibold text-muted underline ${className}`} onClick={() => setOpen(true)}>
         <Flag className="size-3.5" /> Report this shop
       </button>
-      <Sheet open={open} onClose={() => { setOpen(false); if (state !== 'busy') { setState('idle'); setText(''); } }} title={`Report ${shop}`}>
+      <Sheet open={open} onClose={() => { setOpen(false); if (state !== 'busy') { setState('idle'); setText(''); setMsg(''); } }} title={`Report ${shop}`}>
         {state === 'done' ? (
           <div className="py-4 text-center">
             <p className="font-semibold">Thanks, we've got it.</p>
@@ -32,8 +33,14 @@ export function ReportShop({ sellerId, shop, className = '' }: { sellerId: strin
         ) : (
           <form className="space-y-2 pb-2" onSubmit={async (e) => {
             e.preventDefault(); setState('busy');
-            try { await ensureBuyer(); await api.reportShop(sellerId, reason, text.trim()); setState('done'); } catch { setState('error'); }
+            try { await ensureBuyer(); await api.reportShop(sellerId, reason, text.trim()); setState('done'); }
+            catch (err) {
+              // 403 = not a buyer of this shop: retrying can't help, so say why and offer the right path instead.
+              setMsg(err instanceof Error ? err.message : "Couldn't send the report. Try again.");
+              setState(err instanceof ApiError && err.status === 403 ? 'blocked' : 'error');
+            }
           }}>
+            <p className="text-sm text-muted">Reports come from buyers who paid this shop, and they show on its trust line. Problem with one order? Use “Report a problem” on that order.</p>
             <fieldset className="space-y-1.5">
               <legend className="mb-1 text-sm font-semibold">What happened?</legend>
               {REASONS.map(([v, l]) => (
@@ -44,8 +51,8 @@ export function ReportShop({ sellerId, shop, className = '' }: { sellerId: strin
             </fieldset>
             <label className="block text-sm font-semibold" htmlFor="report-text">Details <span className="font-normal text-muted">(optional)</span></label>
             <textarea id="report-text" className="input text-sm" rows={3} maxLength={500} value={text} onChange={(e) => setText(e.target.value)} placeholder="Item, date, amount paid…" />
-            {state === 'error' && <p className="text-sm font-semibold text-hot-dark">Couldn't send the report. Try again.</p>}
-            <button className="btn w-full bg-ink py-3 text-white" disabled={state === 'busy'}>{state === 'busy' ? <Spinner /> : 'Send report'}</button>
+            {(state === 'error' || state === 'blocked') && <p className="text-sm font-semibold text-hot-dark" role="alert">{msg}</p>}
+            {state !== 'blocked' && <button className="btn w-full bg-ink py-3 text-white" disabled={state === 'busy'}>{state === 'busy' ? <Spinner /> : 'Send report'}</button>}
           </form>
         )}
       </Sheet>

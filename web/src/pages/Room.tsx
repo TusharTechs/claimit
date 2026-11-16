@@ -175,7 +175,13 @@ export default function Room() {
       }
       return next;
     });
-    if (entries.drop) { try { setDropState(JSON.parse(entries.drop)); } catch { /* ignore */ } }
+    if (entries.drop) {
+      try {
+        const next = JSON.parse(entries.drop) as DropState;
+        // Only newer drop state wins (a replayed, older signed value is ignored), and an ended drop stays ended.
+        setDropState((cur) => (!cur || ((next.v ?? 0) >= (cur.v ?? 0) && cur.status !== 'ended') ? next : cur));
+      } catch { /* ignore */ }
+    }
     // Only fetch my claims when my own position changed — every viewer refetching on every change would undo Nexconn's fan-out.
     if (mineChanged) refreshClaims();
   };
@@ -308,9 +314,9 @@ export default function Room() {
                 : <>New shop · since {new Date(drop.trust.since).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</>}
             </div>
           )}
-          {drop.trust && !drop.demo && (drop.trust.reports >= 2 || drop.trust.rejectedPct >= 20) && (
+          {drop.trust && !drop.demo && (drop.trust.reports >= 1 || drop.trust.rejectedPct >= 20) && (
             <div className="mt-0.5 text-[11px] font-bold text-hot-dark">
-              ⚠ {[drop.trust.reports >= 2 && `${drop.trust.reports} buyer reports`, drop.trust.rejectedPct >= 20 && `${drop.trust.rejectedPct}% of payments not confirmed`].filter(Boolean).join(' · ')}
+              ⚠ {[drop.trust.reports >= 1 && `${drop.trust.reports} upheld buyer report${drop.trust.reports === 1 ? '' : 's'}`, drop.trust.rejectedPct >= 20 && `${drop.trust.rejectedPct}% of payments not confirmed`].filter(Boolean).join(' · ')}
             </div>
           )}
         </div>
@@ -319,7 +325,7 @@ export default function Room() {
         ) : (
           <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-2.5 py-1 text-xs font-bold text-white">
             <span className={`size-1.5 rounded-full ${connected && online ? 'anim-live bg-hot' : 'bg-white/40'}`} />
-            LIVE{viewers && viewers >= 3 ? ` · ${viewers} watching` : ''}
+            {!current && drop.startsAt && drop.startsAt > Date.now() ? 'SOON' : 'LIVE'}{viewers && viewers >= 3 ? ` · ${viewers} watching` : ''}
           </span>
         )}
         <button onClick={share} className="grid size-10 shrink-0 place-items-center rounded-full bg-white shadow-sm" aria-label="Share this drop">
@@ -362,11 +368,12 @@ export default function Room() {
               isLatest={current.id === latestId && !ended} holdSeconds={drop.holdSeconds} />
           ) : ended ? null : (
             <div className="grid aspect-[4/3] place-items-center rounded-[26px] border-2 border-dashed border-line bg-card px-6 text-center">
+              {drop.startsAt && drop.startsAt > Date.now() ? <Scheduled drop={drop} /> : (
               <div>
                 <LogoMark className="mx-auto size-12" />
                 <div className="mt-3 font-display text-2xl font-bold">The drop starts soon</div>
                 <p className="mt-1 text-muted">Stay on this page — items appear the moment {drop.shop} drops them. Turn your sound on 🔔</p>
-              </div>
+              </div>)}
             </div>
           )}
         </div>
@@ -951,6 +958,32 @@ function OrderCard({ c, buyerName, onChange, toast }: { c: MyClaim; buyerName: s
         <button className="mt-2 w-full py-1 text-center text-sm font-semibold text-muted hover:underline" disabled={busy}
           onClick={() => act(() => api.release(c.id), 'Left the line')}>Leave the line</button>
       )}
+    </div>
+  );
+}
+
+/** A drop the shop scheduled ahead (Pro): live countdown plus a calendar invite (.ics), so buyers come back on time. */
+function Scheduled({ drop }: { drop: PublicDrop }) {
+  const left = useCountdown(drop.startsAt);
+  const d = Math.floor(left / 86_400_000), h = Math.floor(left / 3_600_000) % 24, m = Math.floor(left / 60_000) % 60, sec = Math.floor(left / 1000) % 60;
+  const ics = () => {
+    const t = (ms: number) => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    const url = location.href.split('?')[0];
+    const body = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//ClaimIt//Drop//EN', 'BEGIN:VEVENT', `UID:${drop.id}@claimit`, `DTSTAMP:${t(Date.now())}`,
+      `DTSTART:${t(drop.startsAt!)}`, `DTEND:${t(drop.startsAt! + 3_600_000)}`, `SUMMARY:${drop.shop} live drop: ${drop.title}`.replace(/[,;]/g, ' '),
+      `DESCRIPTION:First tap wins. Open ${url}`, `URL:${url}`, 'BEGIN:VALARM', 'TRIGGER:-PT10M', 'ACTION:DISPLAY', 'DESCRIPTION:Drop starts in 10 minutes', 'END:VALARM', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([body], { type: 'text/calendar' }));
+    a.download = `claimit-${drop.id}.ics`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  return (
+    <div>
+      <div className="text-xs font-bold uppercase tracking-wider text-hot-dark">Scheduled drop</div>
+      <div className="mt-1 font-display text-4xl font-extrabold tabular-nums" role="timer">{d > 0 ? `${d}d ` : ''}{String(h).padStart(2, '0')}:{String(m).padStart(2, '0')}:{String(sec).padStart(2, '0')}</div>
+      <p className="mt-1 text-muted">{new Date(drop.startsAt!).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })} · keep this page open or add a reminder</p>
+      <button className="btn mt-3 bg-ink px-5 py-2.5 text-white" onClick={ics}>Add to calendar</button>
     </div>
   );
 }

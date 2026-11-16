@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, ApiError, sessions, type Cohost, type Insights, type SellerAccount, type SellerDropSummary, type SellerSession } from '../api';
-import { approx, money } from '../util';
-import { ConfirmSheet, CopyButton, Logo, Spinner } from '../components/ui';
+import { approx, money, payLinkFor } from '../util';
+import { ConfirmSheet, CopyButton, Logo, Sheet, Spinner } from '../components/ui';
 import { Crown, Lock, RotateCcw, TrendingUp, UserPlus, X } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -110,6 +110,7 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
   const [title, setTitle] = useState('');
   const [liveUrl, setLiveUrl] = useState('');
   const [hold, setHold] = useState(5);
+  const [startsAt, setStartsAt] = useState(''); // datetime-local (Pro: schedule ahead)
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -136,12 +137,16 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
 
       <form className="mt-6 rounded-[26px] border border-line bg-card p-5 shadow-[var(--shadow-card)]" onSubmit={async (e) => {
         e.preventDefault(); setBusy(true); setErr('');
-        try { const d = await api.createDrop({ title, liveUrl, holdMinutes: hold }); if (d.notified) toast.success(`${d.notified} followers notified`); nav(`/sell/${d.id}`); }
+        try { const d = await api.createDrop({ title, liveUrl, holdMinutes: hold, startsAt: startsAt ? new Date(startsAt).getTime() : null }); if (d.notified) toast.success(`${d.notified} followers notified`); nav(`/sell/${d.id}`); }
         catch (e2) { setErr(e2 instanceof Error ? e2.message : 'Could not create the drop'); setBusy(false); }
       }}>
         <div className="font-display text-xl font-bold">Start a new drop</div>
         <input className="input mt-3" placeholder="e.g. Sunday thrift drop — 20 pieces" value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={80} />
         <input className="input mt-2" placeholder="YouTube live link (optional)" value={liveUrl} onChange={(e) => setLiveUrl(e.target.value)} maxLength={300} />
+        <label className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-ink-2">
+          <span>Schedule it for later <span className="rounded-full bg-sun-soft px-1.5 py-0.5 text-[11px] font-bold text-[#6b4600]">PRO</span><br /><span className="text-xs text-muted">Buyers get a countdown and a calendar invite</span></span>
+          <input type="datetime-local" className="rounded-lg border border-line bg-white px-2 py-1.5 text-ink" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} aria-label="Scheduled start (optional)" />
+        </label>
         <label className="mt-3 flex items-center justify-between gap-3 text-sm text-ink-2">
           <span>Winner gets this long to pay before the next person in line is promoted</span>
           <select className="rounded-lg border border-line bg-white px-2 py-1.5 font-semibold text-ink" value={hold} onChange={(e) => setHold(Number(e.target.value))}>
@@ -194,6 +199,7 @@ function ProTeam({ shop }: { shop: string }) {
   const [name, setName] = useState('');
   const [invite, setInvite] = useState<{ name: string; link: string } | null>(null);
   const [removing, setRemoving] = useState<Cohost | null>(null);
+  const [payOpen, setPayOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const load = async () => {
     try {
@@ -208,9 +214,11 @@ function ProTeam({ shop }: { shop: string }) {
   if (acct.role === 'cohost') {
     return <div className="mt-6 rounded-2xl bg-sun-soft px-4 py-3 text-sm font-semibold">You're a co-host for {shop}{acct.cohostName ? ` (as ${acct.cohostName})` : ''}: you can run drops and confirm payments.</div>;
   }
+  const paySheet = <ProPaySheet open={payOpen} onClose={() => { setPayOpen(false); load(); }} />;
+  const daysLeft = acct.proUntil ? Math.ceil((acct.proUntil - Date.now()) / 86_400_000) : 0;
   if (!acct.pro) {
     return (
-      <section className="mt-6 flex flex-wrap items-start gap-3 rounded-[26px] bg-ink p-5 text-white">
+      <>{paySheet}<section className="mt-6 flex flex-wrap items-start gap-3 rounded-[26px] bg-ink p-5 text-white">
         <Crown className="size-8 shrink-0 text-sun" />
         <div className="min-w-[14rem] flex-1">
           <div className="font-display text-xl font-bold">Go live with a co-host</div>
@@ -218,17 +226,25 @@ function ProTeam({ shop }: { shop: string }) {
           {acct.founding && <span className="mt-2 inline-block rounded-full bg-sun px-2.5 py-1 text-xs font-bold text-ink">Founding seller · 50% off Pro year one</span>}
         </div>
         {acct.trialUsed
-          ? <div className="w-full text-sm text-white sm:w-auto sm:max-w-xs"><b className="text-white">Your trial has ended.</b> You're on Free and nothing was lost.<br />Co-hosts are paused until Pro.{' '}<Link to="/pricing" className="font-semibold text-sun underline">See Pro</Link></div>
+          ? <div className="w-full text-sm text-white sm:w-auto sm:max-w-xs"><b className="text-white">Your trial has ended.</b> You're on Free and nothing was lost. Co-hosts are paused until Pro.
+              <button className="btn mt-2 w-full bg-sun px-5 py-2.5 text-ink" onClick={() => setPayOpen(true)}>Get Pro · ${acct.founding ? '4.50' : '9'}/month</button></div>
           : <button className="btn w-full shrink-0 self-center bg-sun px-5 py-2.5 text-ink sm:w-auto" disabled={busy} onClick={async () => {
               setBusy(true);
               try { await api.proTrial(); toast.success(`Pro trial started: ${trialDays} days free`); await load(); } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not start the trial'); } finally { setBusy(false); }
             }}>{busy ? <Spinner /> : `Start ${trialDays}-day free trial`}</button>}
-      </section>
+      </section></>
     );
   }
   const link = invite ? (invite.link.startsWith('/') ? location.origin + invite.link : invite.link) : '';
   return (
     <section className="mt-6 rounded-[26px] border border-line bg-card p-5 shadow-[var(--shadow-card)]">
+      {paySheet}
+      {daysLeft <= 5 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl bg-sun-soft px-3 py-2 text-sm">
+          <span className="flex-1"><b>Pro ends in {daysLeft} day{daysLeft === 1 ? '' : 's'}.</b> After that you're back on Free: co-hosts pause, nothing is lost.</span>
+          <button className="btn bg-ink px-4 py-1.5 text-sm text-white" onClick={() => setPayOpen(true)}>Renew</button>
+        </div>
+      )}
       <div className="flex items-center gap-2">
         <Crown className="size-5 text-[#b07a00]" />
         <div className="font-display text-xl font-bold">Your team</div>
@@ -324,5 +340,36 @@ function InviteCard({ sellerId, shop }: { sellerId: string; shop: string }) {
         <a className="btn bg-[#075E54] px-4 py-2 text-sm text-white" target="_blank" rel="noreferrer" href={`https://wa.me/?text=${encodeURIComponent(msg)}`}>WhatsApp</a>
       </div>
     </section>
+  );
+}
+
+/** Pay for Pro: ClaimIt's own payment link/account plus a reference; the operator confirms and 30 days are added. */
+function ProPaySheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [b, setB] = useState<Awaited<ReturnType<typeof api.proBilling>> | null>(null);
+  const [ref, setRef] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (open) api.proBilling().then(setB).catch(() => setB(null)); }, [open]);
+  const link = b?.link ? payLinkFor(b.link, b.price, 'USD', 'ClaimIt Pro') : null;
+  return (
+    <Sheet open={open} onClose={onClose} title="Get ClaimIt Pro">
+      {!b ? <Spinner className="my-6 size-6 text-hot" /> : !b.available ? (
+        <p className="pb-4 text-ink-2">Paid Pro opens soon. You'll keep every feature of Free in the meantime.</p>
+      ) : b.pending ? (
+        <div className="pb-4"><p className="font-semibold">Thanks! We're confirming your payment (ref {b.pending.ref}).</p><p className="mt-1 text-sm text-muted">Pro turns on as soon as it's confirmed, usually within a day.</p></div>
+      ) : (
+        <form className="space-y-3 pb-4" onSubmit={async (e) => {
+          e.preventDefault(); setBusy(true);
+          try { await api.proPay(ref.trim()); toast.success('Sent — we\'ll confirm your payment shortly'); setB(await api.proBilling()); }
+          catch (e2) { toast.error(e2 instanceof Error ? e2.message : 'Could not send'); } finally { setBusy(false); }
+        }}>
+          <p className="text-ink-2"><b className="text-ink">{money(b.price, 'USD')} for 30 days</b> of Pro. Renewals add 30 days on top, and if you don't renew you're simply back on Free.</p>
+          {link && <a className="btn w-full bg-mint py-3 text-white" href={link} target="_blank" rel="noreferrer">Pay {money(b.price, 'USD')} ↗</a>}
+          {b.note && <div className="rounded-xl bg-paper p-3 text-sm"><div className="text-muted">Or send it to</div><div className="whitespace-pre-line font-semibold">{b.note}</div></div>}
+          <label className="block text-sm font-semibold" htmlFor="pro-ref">Then add your payment reference</label>
+          <input id="pro-ref" className="input" value={ref} onChange={(e) => setRef(e.target.value)} maxLength={60} placeholder="Transaction ID or the name you paid from" />
+          <button className="btn w-full bg-ink py-3 text-white" disabled={busy || ref.trim().length < 4}>{busy ? <Spinner /> : "I've paid — turn on Pro"}</button>
+        </form>
+      )}
+    </Sheet>
   );
 }

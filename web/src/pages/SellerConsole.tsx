@@ -27,6 +27,14 @@ export default function SellerConsole() {
   const [viewers, setViewers] = useState<number | null>(null);
   const [role, setRole] = useState<'owner' | 'cohost'>('owner');
   const [mobileSection, setMobileSection] = useState<'items' | 'panel'>('items'); // which part the phone tab bar shows as current
+  // Keep the phone tab bar honest when the seller scrolls by hand, not just when they tap it.
+  useEffect(() => {
+    const el = document.getElementById('seller-panel');
+    if (!el || !('IntersectionObserver' in window)) return;
+    const io = new IntersectionObserver(([e]) => setMobileSection(e.isIntersecting ? 'panel' : 'items'), { threshold: 0.25 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [data?.drop.id]);
   // Buyer questions that arrive while the seller is on another tab.
   const [roomUnread, setRoomUnread] = useState(0);
   const roomScroll = useRef<HTMLDivElement>(null);
@@ -178,12 +186,12 @@ export default function SellerConsole() {
       </header>
 
       {needsAction > 0 && (
-        <button onClick={() => { setTab('pay'); document.getElementById('seller-panel')?.scrollIntoView({ behavior: 'smooth' }); }}
+        <button onClick={() => { setMobileSection('panel'); goPanel('pay'); }}
           className="sticky top-[64px] z-20 flex w-full items-center justify-center gap-2 bg-mint px-4 py-2.5 text-sm font-bold text-white lg:hidden">
           💸 {needsAction} payment{needsAction > 1 ? 's' : ''} to confirm →
         </button>
       )}
-      <main className="mx-auto grid max-w-6xl gap-5 px-4 pb-28 pt-5 lg:grid-cols-[1fr_400px]">
+      <main className="mx-auto grid max-w-6xl gap-5 px-4 pt-5 lg:grid-cols-[1fr_400px] lg:pb-28">
         <div className="space-y-5">
           {/* Share + stats */}
           <section className="grid gap-4 rounded-[26px] border border-line bg-card p-4 shadow-[var(--shadow-card)] sm:grid-cols-[auto_1fr]">
@@ -253,7 +261,7 @@ export default function SellerConsole() {
         </div>
 
         {/* Right panel */}
-        <aside id="seller-panel" className="scroll-mt-20 lg:sticky lg:top-[76px] lg:h-[calc(100dvh-96px)]">
+        <aside id="seller-panel" className={`${needsAction > 0 ? 'scroll-mt-28' : 'scroll-mt-20'} lg:sticky lg:top-[76px] lg:h-[calc(100dvh-96px)]`}>
           <div className="flex h-full min-h-[420px] flex-col rounded-[26px] border border-line bg-card p-3 shadow-[var(--shadow-card)]">
             <div className="flex gap-1 rounded-full bg-paper p-1" role="tablist" aria-label="Seller panel" onKeyDown={(e) => {
               // Arrow keys move between tabs (WAI-ARIA tabs pattern).

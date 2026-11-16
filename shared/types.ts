@@ -40,6 +40,8 @@ export interface DropState {
   current: string | null;
   /** When the next item drops automatically (demo room), so viewers see a countdown instead of dead air. */
   nextAt?: number | null;
+  /** Strictly increasing per server write: clients ignore any older (replayed) drop state. */
+  v?: number;
 }
 
 export interface Item {
@@ -111,13 +113,15 @@ export interface PublicDrop {
   /** The always-on demo room (other buyers are bots). */
   demo?: boolean;
   currency?: string;
+  /** Scheduled start (Pro), if the shop announced the drop ahead of time. */
+  startsAt?: number | null;
   /** Track record buyers can check before paying a seller directly. */
   trust?: SellerTrust;
 }
 
 export interface SellerTrust { orders: number; since: number; avgConfirmSec: number | null;
   /** Share of "I've paid" claims the shop rejected, and how many buyers reported the shop: shown so buyers can judge risk. */
-  rejectedPct: number; reports: number }
+  rejectedPct: number; reports: number; reportsUnderReview: number }
 
 export interface MyClaim {
   id: string;

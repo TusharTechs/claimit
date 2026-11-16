@@ -55,9 +55,10 @@ export default function Shop() {
           <ShieldCheck className="size-4 text-mint" /> Fair drops on ClaimIt since {new Date(shop.since).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}
         </p>
         {shop.avgConfirmSec ? <p className="mt-0.5 text-sm text-muted">Usually confirms payments in {approx(shop.avgConfirmSec)}</p> : null}
-        {(shop.reports ?? 0) >= 2 || (shop.rejectedPct ?? 0) >= 20
-          ? <p className="mt-0.5 text-sm font-bold text-hot-dark">⚠ {[(shop.reports ?? 0) >= 2 && `${shop.reports} buyer reports`, (shop.rejectedPct ?? 0) >= 20 && `${shop.rejectedPct}% of payments not confirmed`].filter(Boolean).join(' · ')}</p>
+        {(shop.reports ?? 0) >= 1 || (shop.rejectedPct ?? 0) >= 20
+          ? <p className="mt-0.5 text-sm font-bold text-hot-dark">⚠ {[(shop.reports ?? 0) >= 1 && `${shop.reports} upheld buyer report${shop.reports === 1 ? '' : 's'}`, (shop.rejectedPct ?? 0) >= 20 && `${shop.rejectedPct}% of payments not confirmed`].filter(Boolean).join(' · ')}</p>
           : null}
+        {(shop.reportsUnderReview ?? 0) > 0 && <p className="mt-0.5 text-sm text-muted">{shop.reportsUnderReview} buyer report{shop.reportsUnderReview === 1 ? '' : 's'} under review</p>}
         <div className="mt-4 grid grid-cols-3 gap-2">
           {[['Followers', shop.followers], ['Drops', shop.drops.length], ['Orders', shop.orders]].map(([k, v]) => (
             <div key={k as string} className="rounded-2xl bg-card py-3 shadow-[var(--shadow-card)]"><div className="font-display text-2xl font-extrabold">{v}</div><div className="text-xs text-muted">{k}</div></div>

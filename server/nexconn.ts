@@ -127,6 +127,31 @@ export const nexconn = {
     });
   },
 
+  /** Mute someone in one room (Nexconn native moderation): their messages are refused by Nexconn itself. */
+  async muteParticipant(channelId: string, userId: string, minutes: number) {
+    if (mock) return;
+    await call('/v4/open-channel/participant/mute-list/add', { channelId, participantIds: [userId], durationMinutes: Math.min(minutes, 43_200) });
+  },
+
+  /** Ban from a room: removes them immediately and blocks rejoining for the duration. */
+  async banParticipant(channelId: string, userIds: string[], minutes: number) {
+    if (mock || !userIds.length) return;
+    await call('/v4/open-channel/participant/ban-list/add', { channelId, participantIds: userIds.slice(0, 20), durationMinutes: Math.min(minutes, 43_200) });
+  },
+
+  /** Invalidate every token issued to these users before now: they can't reconnect once disconnected. */
+  async expireTokens(userIds: string[]) {
+    if (mock || !userIds.length) return;
+    await call('/v4/auth/access-token/expire', { userIds: userIds.slice(0, 20), expiresAt: Date.now() });
+  },
+
+  /** Free open-channel metadata keys (each channel holds at most 100). */
+  async removeMetadata(channelId: string, ownerId: string, keys: string[]) {
+    if (!keys.length) return;
+    if (mock) return mockbus.removeMetadata(channelId, keys);
+    await call('/v4/open-channel/metadata/batch/remove', { channelId, metadataOwnerId: ownerId, metadataKeys: keys });
+  },
+
   /** Live number of people in the room. Cached briefly: many viewers poll this. */
   async participantCount(channelId: string): Promise<number | null> {
     const hit = countCache.get(channelId);

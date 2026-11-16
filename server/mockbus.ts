@@ -91,6 +91,13 @@ export const mockbus = {
     for (const uid of openMembers.get(channelId) || []) push(uid, { type: 'metadata', channelId, changes });
   },
 
+  removeMetadata(channelId: string, keys: string[]) {
+    const cur = metadata.get(channelId) || {};
+    for (const k of keys) delete cur[k];
+    const changes = keys.map((key) => ({ key, value: null }));
+    for (const uid of openMembers.get(channelId) || []) push(uid, { type: 'metadata', channelId, changes });
+  },
+
   getMetadata(channelId: string) {
     return metadata.get(channelId) || {};
   },

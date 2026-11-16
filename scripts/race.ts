@@ -112,6 +112,18 @@ if (cfg.mode === 'mock' && cfg.metaKey) {
   const forged = JSON.stringify({ ...JSON.parse(meta[k]!), d: JSON.stringify({ ...JSON.parse(JSON.parse(meta[k]!).d), holder: { id: 'b_attacker', name: 'Attacker' } }) });
   check(!ok(ch, k, forged), 'a forged queue value (fake holder) fails verification');
   check(!ok(`drop_${again.id}`, k, meta[k]!), 'a genuine value replayed into another room fails verification');
+  // Replay in the SAME room: an older, genuinely signed drop state must lose to a newer one (clients keep the highest v).
+  const ch2 = `drop_${live2.id}`;
+  const it2 = (await call('POST', `/api/seller/drops/${live2.id}/items`, { name: 'Versioned tee', price: 9 }, sh)).json;
+  await call('POST', `/api/seller/drops/${live2.id}/items/${it2.id}/drop`, {}, sh);
+  await new Promise((r) => setTimeout(r, 300));
+  const before2 = (await call('GET', `/api/mock/metadata?channelId=${ch2}`)).json as Record<string, string>;
+  await call('POST', `/api/seller/drops/${live2.id}/end`, {}, sh);
+  await new Promise((r) => setTimeout(r, 300));
+  const after2 = (await call('GET', `/api/mock/metadata?channelId=${ch2}`)).json as Record<string, string>;
+  const dv = (v?: string) => (v ? JSON.parse(JSON.parse(v).d).v ?? 0 : 0);
+  check(!!before2.drop && !!after2.drop && ok(ch2, 'drop', before2.drop!) && ok(ch2, 'drop', after2.drop!) && dv(after2.drop) > dv(before2.drop),
+    'drop state is versioned: the newer "ended" state outranks a replay of the older "live" one');
 }
 await call('POST', `/api/seller/drops/${live2.id}/end`, {}, sh);
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nAll checks passed: no double-claims under contention.');

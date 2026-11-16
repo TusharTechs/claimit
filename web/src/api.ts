@@ -78,7 +78,7 @@ export interface SellerDrop {
 }
 
 export interface ShopDrop { id: string; title: string; status: 'live' | 'ended'; created: number; items: number; sold: number; cover: string | null }
-export interface Shop { id: string; shop: string; name: string; followers: number; orders: number; since: number; avgConfirmSec?: number | null; rejectedPct?: number; reports?: number; following: boolean; drops: ShopDrop[] }
+export interface Shop { id: string; shop: string; name: string; followers: number; orders: number; since: number; avgConfirmSec?: number | null; rejectedPct?: number; reports?: number; reportsUnderReview?: number; following: boolean; drops: ShopDrop[] }
 export interface Impact {
   sellers: number; drops: number; buyers: number; claimsSettled: number; contestedItems: number; itemsSold: number; gmvUsd: number;
   demo?: { visitors: number; claimTaps: number; humanWins: number }; proWaitlist?: number;
@@ -94,6 +94,8 @@ export const api = {
     req<SellerSession & { userId: string; token: string }>('POST', '/api/sellers', b),
   sellerSession: () => req<SellerSession & SellerAccount & { userId: string; token: string }>('POST', '/api/seller/session', {}, 'seller'),
   reportShop: (sellerId: string, reason: string, text: string) => req('POST', `/api/shops/${sellerId}/report`, { reason, text }, 'buyer'),
+  proBilling: () => req<{ available: boolean; link: string | null; note: string | null; price: number; pending: { id: string; amount: number; ref: string; created: number } | null; proUntil: number | null }>('GET', '/api/seller/pro/billing', undefined, 'seller'),
+  proPay: (ref: string) => req<{ id: string; status: string }>('POST', '/api/seller/pro/pay', { ref }, 'seller'),
   insights: () => req<Insights>('GET', '/api/seller/insights', undefined, 'seller'),
   proTrial: () => req<{ pro: boolean; proUntil: number }>('POST', '/api/seller/pro/trial', {}, 'seller'),
   cohosts: () => req<Cohost[]>('GET', '/api/seller/cohosts', undefined, 'seller'),
@@ -103,7 +105,7 @@ export const api = {
   sellerDrops: () => req<SellerDropSummary[]>('GET', '/api/seller/drops', undefined, 'seller'),
   sellerProfiles: (ids: string[]) =>
     req<{ userId: string; name: string }[]>('GET', `/api/seller/profiles?ids=${encodeURIComponent(ids.join(','))}`, undefined, 'seller'),
-  createDrop: (b: { title: string; liveUrl?: string; holdMinutes?: number }) => req<{ id: string; notified: number }>('POST', '/api/seller/drops', b, 'seller'),
+  createDrop: (b: { title: string; liveUrl?: string; holdMinutes?: number; startsAt?: number | null }) => req<{ id: string; notified: number }>('POST', '/api/seller/drops', b, 'seller'),
   /** Validate a seller id/key pair (used by the "open on another device" link) without storing it first. */
   sellerLogin: async (id: string, key: string) => {
     const res = await fetch('/api/seller/session', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-seller-id': id, 'x-seller-key': key }, body: '{}' });

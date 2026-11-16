@@ -181,6 +181,29 @@ app.post('/api/seller/pro/trial', h((req) => {
   return { pro: true, proUntil: until };
 }));
 
+/**
+ * Paying for Pro, without a card processor: the shop pays ClaimIt's own payment link (PRO_PAY_LINK, e.g. a PayPal.me or
+ * Stripe Payment Link) or account (PRO_PAY_NOTE), submits the reference, and an admin confirms it — which adds 30 days.
+ * The same pro_until check gates every Pro feature, so a processor webhook can replace the admin step without other changes.
+ */
+const proBilling = () => ({ link: process.env.PRO_PAY_LINK || null, note: process.env.PRO_PAY_NOTE || null });
+app.get('/api/seller/pro/billing', h((req) => {
+  const s = ownerOnly(req);
+  const b = proBilling();
+  const pending = db.prepare(`SELECT id, amount, ref, created FROM pro_payments WHERE seller_id = ? AND status = 'pending' ORDER BY created DESC LIMIT 1`).get(s.id) ?? null;
+  return { available: !!(b.link || b.note), link: b.link, note: b.note, price: s.founding ? 4.5 : 9, pending, proUntil: s.pro_until };
+}));
+app.post('/api/seller/pro/pay', limit('propay', 10, 60 * 60_000), h((req) => {
+  const s = ownerOnly(req);
+  if (!proBilling().link && !proBilling().note) throw new AppError(409, 'NO_BILLING', 'Pro billing opens soon');
+  const ref = str(req.body.ref, 60, 'Payment reference');
+  if (ref.length < 4) throw new AppError(400, 'BAD_REF', 'Add the transaction ID or the name you paid from');
+  if (db.prepare(`SELECT 1 FROM pro_payments WHERE seller_id = ? AND status = 'pending'`).get(s.id)) throw new AppError(409, 'PENDING', 'We are already confirming a payment from you');
+  const id = rid(10);
+  db.prepare('INSERT INTO pro_payments (id, seller_id, amount, ref, created) VALUES (?, ?, ?, ?, ?)').run(id, s.id, s.founding ? 4.5 : 9, ref, now());
+  return { id, status: 'pending' };
+}));
+
 /** Co-hosts: helpers who run the console (confirm payments, drop items, ship) on their own device with their own key. */
 app.get('/api/seller/cohosts', h((req) => {
   const s = ownerOnly(req);
@@ -203,7 +226,13 @@ app.post('/api/seller/cohosts', limit('cohost', 20, 60 * 60_000), h((req) => {
 app.delete('/api/seller/cohosts/:id', h((req) => {
   const s = ownerOnly(req);
   db.prepare('DELETE FROM cohosts WHERE id = ? AND seller_id = ?').run(String(req.params.id), s.id);
-  db.prepare('DELETE FROM tokens WHERE user_id = ?').run(cohostUserId(String(req.params.id))); // no cached chat token survives removal
+  // Cut the co-host off at Nexconn too: expire their tokens and remove them from this shop's live rooms for a day.
+  const uid = cohostUserId(String(req.params.id));
+  db.prepare('DELETE FROM tokens WHERE user_id = ?').run(uid);
+  nexconn.expireTokens([uid]).catch((e) => console.error('[cohost expire]', e?.message));
+  for (const d of db.prepare(`SELECT channel_id FROM drops WHERE seller_id = ? AND status = 'live'`).all(s.id) as { channel_id: string }[]) {
+    nexconn.banParticipant(d.channel_id, [uid], 1440).catch((e) => console.error('[cohost ban]', e?.message));
+  }
   return { ok: true };
 }));
 
@@ -233,7 +262,13 @@ app.post('/api/seller/drops', limit('drop', 20, 60 * 60_000), h(async (req) => {
   const title = str(req.body.title, 80, 'Drop title');
   const liveUrl = str(req.body.liveUrl, 300, 'Live link', false) || null;
   const hold = holdMinutes(req.body.holdMinutes) ?? Math.round(config.holdSeconds / 60);
-  return openDrop(req, s, title, liveUrl, hold);
+  // Scheduling a drop ahead of time is a Pro feature: followers get the date, buyers get a countdown and a calendar invite.
+  const startsAt = Number(req.body.startsAt) || null;
+  if (startsAt) {
+    if (!isPro(s)) throw new AppError(402, 'PRO_ONLY', 'Scheduling drops ahead is a Pro feature');
+    if (startsAt < now() + 5 * 60_000 || startsAt > now() + 60 * 86_400_000) throw new AppError(400, 'BAD_TIME', 'Pick a time between 5 minutes and 60 days from now');
+  }
+  return openDrop(req, s, title, liveUrl, hold, false, startsAt);
 }));
 
 /** "Run again": a new drop with the same settings and every item that didn't sell last time (photos, names, prices). */
@@ -257,19 +292,21 @@ app.post('/api/seller/drops/:dropId/again', limit('drop', 20, 60 * 60_000), h(as
 /** Followers hear about a shop's new drop at most once every 30 minutes, however many drops are opened. */
 const lastNotified = new Map<string, number>();
 
-async function openDrop(req: Request, s: { id: string; shop: string }, title: string, liveUrl: string | null, hold: number, practice = false) {
+async function openDrop(req: Request, s: { id: string; shop: string }, title: string, liveUrl: string | null, hold: number, practice = false, startsAt: number | null = null) {
   const id = rid(8);
   const channelId = `drop_${id}`;
   await nexconn.createOpenChannel(channelId);
-  db.prepare('INSERT INTO drops (id, seller_id, title, channel_id, status, live_url, created, hold_seconds, practice) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(id, s.id, title, channelId, 'live', liveUrl, now(), hold * 60, practice ? 1 : 0);
+  db.prepare('INSERT INTO drops (id, seller_id, title, channel_id, status, live_url, created, hold_seconds, practice, starts_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(id, s.id, title, channelId, 'live', liveUrl, now(), hold * 60, practice ? 1 : 0, startsAt);
   if (practice || now() - (lastNotified.get(s.id) ?? 0) < 30 * 60_000) return { id, notified: 0 };
   lastNotified.set(s.id, now());
   // Tell followers over Nexconn (1:1 message from the shop), in batches of up to 1000 recipients per call.
   const followers = (db.prepare('SELECT buyer_id FROM follows WHERE seller_id = ?').all(s.id) as { buyer_id: string }[]).map((r) => r.buyer_id);
   const base = config.publicUrl || `${req.protocol}://${req.get('host')}`;
   for (let i = 0; i < followers.length; i += 1000) {
-    nexconn.sendDirect(sellerUserId(s.id), '', 'RC:TxtMsg', { content: `🔴 ${s.shop} just opened a new drop: “${title}”. First tap wins → ${base}/d/${id}` },
+    nexconn.sendDirect(sellerUserId(s.id), '', 'RC:TxtMsg', { content: startsAt
+        ? `📅 ${s.shop} scheduled a drop: “${title}”. Open the link to see when it starts and add it to your calendar → ${base}/d/${id}`
+        : `🔴 ${s.shop} just opened a new drop: “${title}”. First tap wins → ${base}/d/${id}` },
       `${s.shop} is dropping live now`, followers.slice(i, i + 1000)).catch((e) => console.error('[notify followers]', e?.message));
   }
   return { id, notified: followers.length };
@@ -342,7 +379,7 @@ app.get('/api/seller/insights', h((req) => {
     coversPro: false,
   };
   // "Fair drops paid for Pro this month": only when the rescued sales, in USD, reach the $9 Pro price.
-  base.coversPro = base.rescuedThisMonth * (USD_RATE[s.currency] ?? 0) >= 9;
+  base.coversPro = base.rescuedThisMonth * (USD_RATE[s.currency] ?? 0) >= (s.founding ? 4.5 : 9); // their own Pro price
   if (!base.pro) return base;
   // Of all holds that ended in "paid" or "never paid", the share that never paid.
   const winners = one(`SELECT COUNT(*) FROM claims c JOIN drops d ON d.id = c.drop_id WHERE ${REAL} AND c.status IN ('paid','expired')`, s.id);
@@ -356,7 +393,7 @@ app.get('/api/seller/insights', h((req) => {
     buyers: buyers.length,
     repeatBuyers: buyers.filter((b) => b.n > 1).length,
     avgPaySec: Math.round(one(`SELECT COALESCE(AVG(c.paying_at - c.created),0) FROM claims c JOIN drops d ON d.id = c.drop_id WHERE ${REAL} AND c.paying_at IS NOT NULL`, s.id) / 1000),
-    ...(({ avgConfirmSec, rejectedPct, reports }) => ({ avgConfirmSec, rejectedPct, reports }))(sellerTrust(s.id)),
+    ...(({ avgConfirmSec, rejectedPct, reports, reportsUnderReview }) => ({ avgConfirmSec, rejectedPct, reports, reportsUnderReview }))(sellerTrust(s.id)),
     bestHourUtc: hours ? hours.h : null,
   };
 }));
@@ -438,10 +475,16 @@ function rewardReferrer(sellerId: string) {
   if (!s?.ref_by || s.ref_rewarded) return;
   // Anti-farming: the invited shop needs real, independent customers. At least 3 different named buyers must have paid it,
   // none of whom ever claimed from the inviting shop (so a seller can't open a second shop and buy from themselves).
-  const independent = (db.prepare(`SELECT COUNT(DISTINCT c.buyer_id) AS n FROM claims c JOIN drops d ON d.id = c.drop_id JOIN buyers b ON b.id = c.buyer_id
-    WHERE d.seller_id = ? AND d.practice = 0 AND c.status = 'paid' AND b.is_guest = 0
-      AND NOT EXISTS (SELECT 1 FROM claims c2 JOIN drops d2 ON d2.id = c2.drop_id WHERE d2.seller_id = ? AND c2.buyer_id = c.buyer_id)`).get(sellerId, s.ref_by) as { n: number }).n;
-  if (independent < 3) return;
+  // Independent = different delivery phone numbers (not just different typed names), each order worth at least ~$5,
+  // and none of those phones ever bought from the inviting shop. The shop also must have no open or upheld reports.
+  const cur = (db.prepare('SELECT currency FROM sellers WHERE id = ?').get(sellerId) as { currency: string }).currency;
+  const minPrice = 5 / (USD_RATE[cur] || 1);
+  const independent = (db.prepare(`SELECT COUNT(DISTINCT c.ship_phone) AS n FROM claims c JOIN drops d ON d.id = c.drop_id JOIN items i ON i.id = c.item_id
+    WHERE d.seller_id = ? AND d.practice = 0 AND c.status = 'paid' AND i.price >= ? AND COALESCE(c.ship_phone, '') != ''
+      AND NOT EXISTS (SELECT 1 FROM claims c2 JOIN drops d2 ON d2.id = c2.drop_id WHERE d2.seller_id = ? AND c2.ship_phone = c.ship_phone)`)
+    .get(sellerId, minPrice, s.ref_by) as { n: number }).n;
+  const disputed = (db.prepare(`SELECT COUNT(*) AS n FROM shop_reports WHERE seller_id = ? AND status != 'dismissed'`).get(sellerId) as { n: number }).n;
+  if (independent < 3 || disputed > 0) return;
   tx(() => {
     const r = db.prepare('SELECT pro_until FROM sellers WHERE id = ?').get(s.ref_by) as { pro_until: number | null };
     db.prepare('UPDATE sellers SET pro_until = ? WHERE id = ?').run(Math.max(now(), r.pro_until ?? 0) + 30 * 86_400_000, s.ref_by);
@@ -544,7 +587,7 @@ app.get('/api/shops/:sellerId', h((req) => {
     id: s.id, shop: s.shop, name: s.name,
     followers: count('SELECT COUNT(*) FROM follows WHERE seller_id = ?'),
     orders: count(`SELECT COUNT(*) FROM claims c JOIN drops d ON d.id = c.drop_id WHERE d.seller_id = ? AND c.status = 'paid'`),
-    ...(({ avgConfirmSec, rejectedPct, reports }) => ({ avgConfirmSec, rejectedPct, reports }))(sellerTrust(s.id)),
+    ...(({ avgConfirmSec, rejectedPct, reports, reportsUnderReview }) => ({ avgConfirmSec, rejectedPct, reports, reportsUnderReview }))(sellerTrust(s.id)),
     since: Number(Object.values(db.prepare('SELECT created FROM sellers WHERE id = ?').get(s.id) as object)[0]),
     following: b ? !!db.prepare('SELECT 1 FROM follows WHERE seller_id = ? AND buyer_id = ?').get(s.id, b.id) : false,
     drops: drops.map((d) => ({ ...d, cover: d.cover ? `/img/${d.cover}` : null })),
@@ -608,8 +651,10 @@ app.post('/api/shops/:sellerId/report', limit('report', 10, 60 * 60_000), h((req
   const b = buyer(req);
   const s = q.seller(String(req.params.sellerId));
   if (!s) throw new AppError(404, 'NO_SHOP', 'Shop not found');
+  // A confirmed order, or a payment the shop rejected that the buyer backed with a payment reference. Merely tapping
+  // "I've paid" without paying isn't enough to report someone.
   const ordered = db.prepare(`SELECT 1 FROM claims c JOIN drops d ON d.id = c.drop_id WHERE d.seller_id = ? AND d.practice = 0 AND c.buyer_id = ?
-    AND (c.status IN ('paid','rejected') OR c.paying_at IS NOT NULL) LIMIT 1`).get(s.id, b.id);
+    AND (c.status = 'paid' OR (c.status = 'rejected' AND COALESCE(c.utr, '') != '')) LIMIT 1`).get(s.id, b.id);
   if (!ordered) throw new AppError(403, 'NOT_A_BUYER', 'Only buyers who paid this shop can report it. Use "Report a problem" on your order instead.');
   const reason = ['no_item', 'payment_not_confirmed', 'scam', 'other'].includes(String(req.body.reason)) ? String(req.body.reason) : 'other';
   db.prepare('INSERT OR IGNORE INTO shop_reports (seller_id, buyer_id, reason, text, created) VALUES (?, ?, ?, ?, ?)')
@@ -736,7 +781,11 @@ export function moderateRoomChat(senderId: string, channelId: string, messageTyp
   if (strikes >= 3) { logEvent(d.id, 'muted_blocked', senderId); return { pass: 0, extra: 'muted' }; }
   const text = String(c.text ?? '').slice(0, 200);
   const masked = maskPay(text);
-  if (masked !== text) logEvent(d.id, 'scam_masked', senderId);
+  if (masked !== text) {
+    logEvent(d.id, 'scam_masked', senderId);
+    // Third strike: mute them in this room with Nexconn's own moderation (2 hours), so later attempts never even reach us.
+    if (strikes + 1 >= 3) nexconn.muteParticipant(channelId, senderId, 120).catch((e) => console.error('[mute]', e?.message));
+  }
   if (masked === text && c.name === real) return { pass: 1 };
   return { pass: 1, replaceContent: JSON.stringify({ text: masked, name: real, ...(masked !== text ? { masked: true } : {}) }) };
 }
@@ -796,6 +845,26 @@ app.get('/api/admin/reports', h((req) => {
   return db.prepare(`SELECT r.seller_id AS sellerId, s.shop, r.buyer_id AS buyerId, r.reason, r.text, r.status, r.created FROM shop_reports r
     JOIN sellers s ON s.id = r.seller_id ORDER BY r.status = 'open' DESC, r.created DESC LIMIT 200`).all();
 }));
+app.get('/api/admin/payments', h((req) => {
+  admin(req);
+  return db.prepare(`SELECT p.id, p.seller_id AS sellerId, s.shop, p.amount, p.ref, p.status, p.created, s.pro_until AS proUntil FROM pro_payments p
+    JOIN sellers s ON s.id = p.seller_id ORDER BY p.status = 'pending' DESC, p.created DESC LIMIT 200`).all();
+}));
+app.post('/api/admin/payments/:id/decide', h((req) => {
+  admin(req);
+  const p = db.prepare(`SELECT seller_id, status FROM pro_payments WHERE id = ?`).get(String(req.params.id)) as { seller_id: string; status: string } | undefined;
+  if (!p || p.status !== 'pending') throw new AppError(409, 'BAD_STATE', 'Already decided');
+  const ok = req.body.confirm === true;
+  tx(() => {
+    db.prepare('UPDATE pro_payments SET status = ?, decided = ? WHERE id = ?').run(ok ? 'confirmed' : 'rejected', now(), String(req.params.id));
+    if (ok) {
+      const cur = (db.prepare('SELECT pro_until FROM sellers WHERE id = ?').get(p.seller_id) as { pro_until: number | null }).pro_until ?? 0;
+      db.prepare('UPDATE sellers SET pro_until = ? WHERE id = ?').run(Math.max(now(), cur) + 30 * 86_400_000, p.seller_id); // renewals stack
+    }
+  });
+  return { ok: true };
+}));
+
 app.post('/api/admin/reports/resolve', h((req) => {
   admin(req);
   const status = req.body.status === 'dismissed' ? 'dismissed' : 'upheld';

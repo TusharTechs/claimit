@@ -20,7 +20,7 @@ export class AppError extends Error {
   constructor(public status: number, public code: string, message: string) { super(message); }
 }
 
-interface DropRow { id: string; seller_id: string; title: string; channel_id: string; status: 'live' | 'ended'; live_url: string | null; current_item: string | null; hold_seconds: number | null }
+interface DropRow { id: string; seller_id: string; title: string; channel_id: string; status: 'live' | 'ended'; live_url: string | null; current_item: string | null; hold_seconds: number | null; starts_at?: number | null }
 interface ItemRow { id: string; drop_id: string; name: string; price: number; image_id: string | null; status: ItemStatus; idx: number; dropped_at: number | null; version: number }
 interface ClaimRow { id: string; item_id: string; drop_id: string; buyer_id: string; buyer_name: string; status: ClaimStatus; seq: number; hold_until: number | null; utr: string | null; order_msg_id: string | null }
 interface SellerRow { id: string; name: string; shop: string; upi: string; currency: string; pay_link: string | null; pay_note: string | null }
@@ -72,9 +72,10 @@ export function sellerTrust(sellerId: string): SellerTrust {
     WHERE d.seller_id = ? AND d.practice = 0 AND c.status = 'paid' AND c.buyer_id NOT LIKE 'bot\\_%' ESCAPE '\\'`).get(sellerId) as { n: number; avg: number | null };
   const since = (db.prepare('SELECT created FROM sellers WHERE id = ?').get(sellerId) as { created: number } | undefined)?.created ?? now();
   const rej = (db.prepare(`SELECT COUNT(*) AS n FROM claims c JOIN drops d ON d.id = c.drop_id WHERE d.seller_id = ? AND d.practice = 0 AND c.status = 'rejected' AND c.paying_at IS NOT NULL`).get(sellerId) as { n: number }).n;
-  // Verified-buyer reports that haven't been dismissed on review.
-  const reports = (db.prepare(`SELECT COUNT(*) AS n FROM shop_reports WHERE seller_id = ? AND status != 'dismissed'`).get(sellerId) as { n: number }).n;
-  return { orders: r.n, since, avgConfirmSec: r.avg ? Math.round(r.avg / 1000) : null, rejectedPct: r.n + rej ? Math.round((rej / (r.n + rej)) * 100) : 0, reports };
+  // Verified-buyer reports: upheld ones count against the shop; open ones are only shown as "under review".
+  const reports = (db.prepare(`SELECT COUNT(*) AS n FROM shop_reports WHERE seller_id = ? AND status = 'upheld'`).get(sellerId) as { n: number }).n;
+  const reportsUnderReview = (db.prepare(`SELECT COUNT(*) AS n FROM shop_reports WHERE seller_id = ? AND status = 'open'`).get(sellerId) as { n: number }).n;
+  return { orders: r.n, since, avgConfirmSec: r.avg ? Math.round(r.avg / 1000) : null, rejectedPct: r.n + rej ? Math.round((rej / (r.n + rej)) * 100) : 0, reports, reportsUnderReview };
 }
 
 export function publicDrop(dropId: string): PublicDrop {
@@ -86,9 +87,9 @@ export function publicDrop(dropId: string): PublicDrop {
   for (const it of items) if (it.status !== 'draft') state[it.id] = itemState(it.id);
   return {
     id: d.id, title: d.title, shop: s.shop, sellerId: sellerUserId(s.id), channelId: d.channel_id,
-    status: d.status, liveUrl: d.live_url, holdSeconds: holdSecondsFor(d.id),
+    status: d.status, liveUrl: d.live_url, holdSeconds: holdSecondsFor(d.id), startsAt: d.starts_at ?? null,
     items: items.filter((i) => i.status !== 'draft').map(toItem),
-    state, drop: { status: d.status, current: d.current_item }, demo: d.id === 'demo', currency: s.currency, trust: sellerTrust(s.id),
+    state, drop: { status: d.status, current: d.current_item, v: now() }, // REST is current, so newer than any earlier write, demo: d.id === 'demo', currency: s.currency, trust: sellerTrust(s.id),
   };
 }
 
@@ -136,6 +137,8 @@ async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
  * Queue a metadata write. Writes are coalesced: while one is waiting in the channel's queue, later changes merge into it,
  * and item state is read when the write actually runs, so a burst of 50 claims becomes one or two writes of the latest state.
  */
+let lastDropVersion = 0;
+const nextDropVersion = () => (lastDropVersion = Math.max(lastDropVersion + 1, now()));
 const pendingWrites = new Map<string, { ids: Set<string>; extra: Record<string, string> }>();
 function publish(dropId: string, itemIds: string[], extra: Record<string, string> = {}) {
   const d = q.drop(dropId)!;
@@ -148,6 +151,8 @@ function publish(dropId: string, itemIds: string[], extra: Record<string, string
     const raw: Record<string, string> = { ...batch.extra };
     for (const id of batch.ids) raw[itemKey(id)] = JSON.stringify(itemState(id));
     // Signed and bound to channel+key: viewers' SDKs can write metadata too, and clients ignore anything unsigned.
+    // Drop-level state gets a strictly increasing version, so a replayed older (but genuinely signed) value is ignored.
+    if (raw.drop) raw.drop = JSON.stringify({ ...JSON.parse(raw.drop), v: nextDropVersion() });
     const entries = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, seal(d.channel_id, k, v)]));
     return withRetry(() => nexconn.setMetadata(d.channel_id, sellerUserId(d.seller_id), entries));
   });
@@ -189,7 +194,7 @@ function sendOrder(claimId: string) {
     let id: string | null;
     try {
       id = await nexconn.sendDirect(sellerUserId(s.id), c.buyer_id, MSG.ORDER, order,
-        `You got ${it.name}! Pay within ${fmtHold(holdSecondsFor(d.id))} to keep it.`, undefined, { s: 'holding', g: signStatus(claimId, 'holding') });
+        `You got ${it.name}! Pay within ${fmtHold(holdSecondsFor(d.id))} to keep it.`, undefined, (() => { const t = String(now()); return { s: 'holding', t, g: signStatus(claimId, 'holding', t) }; })());
     } catch (e) { failedOrderCards.add(claimId); throw e; } // only a send that actually failed is ever resent
     if (id) db.prepare('UPDATE claims SET order_msg_id = ? WHERE id = ?').run(id, claimId);
     else console.warn('[order card] no messageId returned; live status updates disabled for claim', claimId);
@@ -206,7 +211,7 @@ export function markShipped(claimId: string, sellerId: string, tracking: string)
   const sellerId_ = sellerUserId(q.drop(c.drop_id)!.seller_id);
   enqueue(`dm:${c.buyer_id}`, async () => {
     const fresh = q.claim(claimId)!;
-    if (fresh.order_msg_id) await nexconn.setMessageMetadata(fresh.order_msg_id, sellerId_, fresh.buyer_id, { s: 'shipped', t: String(now()), g: signStatus(claimId, 'shipped') });
+    if (fresh.order_msg_id) await nexconn.setMessageMetadata(fresh.order_msg_id, sellerId_, fresh.buyer_id, (() => { const t = String(now()); return { s: 'shipped', t, g: signStatus(claimId, 'shipped', t) }; })());
     await nexconn.sendDirect(sellerId_, c.buyer_id, MSG.ORDER_UPDATE,
       { claimId, status: 'paid', text: `📦 ${it.name} is on its way!${tracking ? `\nTracking: ${tracking}` : ''}` }, `${it.name} has shipped`);
   });
@@ -220,7 +225,7 @@ function updateOrderCard(claimId: string) {
   return enqueue(`dm:${c.buyer_id}`, async () => {
     const fresh = q.claim(claimId)!;
     if (!fresh.order_msg_id) return;
-    await nexconn.setMessageMetadata(fresh.order_msg_id, sellerId, fresh.buyer_id, { s: fresh.status, t: String(now()), g: signStatus(claimId, fresh.status) });
+    await nexconn.setMessageMetadata(fresh.order_msg_id, sellerId, fresh.buyer_id, (() => { const t = String(now()); return { s: fresh.status, t, g: signStatus(claimId, fresh.status, t) }; })());
   });
 }
 
@@ -427,6 +432,12 @@ export function endDrop(dropId: string) {
   const dropState: DropState = { status: 'ended', current: null };
   publish(dropId, [], { drop: JSON.stringify(dropState) });
   roomEvent(dropId, { kind: 'ended', text: 'This drop has ended. Thanks for shopping!' });
+  // Ten minutes later, free the item keys (a channel holds at most 100); late visitors read the final state over REST.
+  const d = q.drop(dropId)!;
+  setTimeout(() => {
+    const keys = q.items(dropId).map((i) => itemKey(i.id));
+    enqueue(d.channel_id, () => nexconn.removeMetadata(d.channel_id, sellerUserId(d.seller_id), keys));
+  }, 10 * 60_000).unref?.();
 }
 
 /** An order card whose send threw is sent again once (5s later), so a winner is never left without checkout. A send that

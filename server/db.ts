@@ -117,6 +117,7 @@ addColumn('sellers', 'trial_used', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('sellers', 'founding', 'INTEGER NOT NULL DEFAULT 0'); // first 100 shops: 50% off Pro for a year
 addColumn('sellers', 'ref_by', 'TEXT'); // the shop that invited this one
 addColumn('sellers', 'ref_rewarded', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('drops', 'starts_at', 'INTEGER'); // scheduled start (Pro): buyers see a countdown and can add it to their calendar
 addColumn('shop_reports', 'status', "TEXT NOT NULL DEFAULT 'open'"); // open | upheld | dismissed (admin review) // account details (GCash number, bank account, Zelle email…)
 addColumn('drops', 'practice', 'INTEGER NOT NULL DEFAULT 0');
 db.exec(`
@@ -125,6 +126,15 @@ CREATE TABLE IF NOT EXISTS follows (
   buyer_id TEXT NOT NULL REFERENCES buyers(id),
   created INTEGER NOT NULL,
   PRIMARY KEY (seller_id, buyer_id)
+);
+CREATE TABLE IF NOT EXISTS pro_payments (
+  id TEXT PRIMARY KEY,
+  seller_id TEXT NOT NULL,
+  amount REAL NOT NULL,
+  ref TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending', -- pending | confirmed | rejected
+  created INTEGER NOT NULL,
+  decided INTEGER
 );
 CREATE TABLE IF NOT EXISTS shop_reports (
   seller_id TEXT NOT NULL,

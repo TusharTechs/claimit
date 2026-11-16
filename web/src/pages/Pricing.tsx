@@ -15,6 +15,7 @@ const PRO: [string, boolean][] = [
   ['Everything in Free', true],
   ['Co-hosts: up to 5 helpers confirm payments and drop items from their own phone while you present', true],
   ['Lifetime analytics: no-show rate, repeat buyers, time to pay, best hour to drop', true],
+  ['Scheduled drops: a countdown page and calendar invites, so followers show up on time', true],
   ['Priority support on WhatsApp', true],
   ['Auto-confirm payments via Stripe, PayPal & UPI gateways — no manual checks', false],
   ['Custom shop link and your logo on the drop page', false],
@@ -89,7 +90,7 @@ function ProCta({ acct }: { acct: SellerAccount | null }) {
   const toasts = useToasts();
   const loggedIn = !!sessions.seller();
   if (!loggedIn) {
-    return <Link to="/sell" className="btn mt-7 w-full bg-sun py-3.5 text-ink">Create a shop, then try Pro free for 14 days</Link>;
+    return <Link to="/sell" className="btn mt-7 w-full bg-sun py-3.5 text-ink">Create a shop, then try Pro free for 14 days (30 if a shop invited you)</Link>;
   }
   if (!acct) return <div className="btn mt-7 w-full bg-white/10 py-3.5 text-white/70"><Spinner /></div>;
   if (acct.role === 'cohost') return <div className="mt-7 rounded-2xl bg-white/10 p-3.5 text-center text-sm font-semibold">You're a co-host. The shop owner manages the plan.</div>;
@@ -102,6 +103,6 @@ function ProCta({ acct }: { acct: SellerAccount | null }) {
       setBusy(true);
       try { await api.proTrial(); celebrate({ x: 0.75, y: 0.6 }); toasts.push(`Pro trial started: ${acct.referred ? 30 : 14} days free`, 'mint'); nav('/sell'); }
       catch (e) { toasts.push(e instanceof Error ? e.message : 'Could not start the trial', 'hot'); } finally { setBusy(false); }
-    }}>{busy ? <Spinner /> : `Start ${acct.referred ? 30 : 14}-day free trial — no card needed`}</button>
+    }}>{busy ? <Spinner /> : `Start ${acct.referred ? 30 : 14}-day free trial — no card${acct.founding ? ', then $4.50/mo' : ''}`}</button>
   );
 }

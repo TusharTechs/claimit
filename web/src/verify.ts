@@ -9,6 +9,8 @@ function key() {
   keyPromise ??= rt.config().then((cfg) => cfg.metaKey
     ? crypto.subtle.importKey('spki', b64(cfg.metaKey), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify'])
     : null).catch(() => null);
+  // A failed fetch/import must not disable live updates for the rest of the session: try again next time.
+  keyPromise.then((k) => { if (!k) keyPromise = null; });
   return keyPromise;
 }
 
@@ -30,10 +32,18 @@ export async function openSealed(channelId: string, k: string, value: string | n
 }
 
 const statusCache = new Map<string, Promise<boolean>>();
-/** True if this order-card status was set by the server (not by a client editing its own message's metadata). */
-export function verifyOrderStatus(claimId: string, status: string | undefined, sig: string | undefined): Promise<boolean> {
-  if (!claimId || !status || !sig) return Promise.resolve(false);
-  const ck = `${claimId}|${status}|${sig}`;
-  if (!statusCache.has(ck)) statusCache.set(ck, verify(`order|${claimId}|${status}`, sig));
-  return statusCache.get(ck)!;
+const newest = new Map<string, number>(); // claimId -> time of the newest verified status seen
+/**
+ * True if this order-card status was set by the server (not by a client editing its own message's metadata) AND is not
+ * older than a status already seen for this claim — so a buyer can't roll "shipped" back to an earlier, also-signed state.
+ */
+export async function verifyOrderStatus(claimId: string, status: string | undefined, t: string | undefined, sig: string | undefined): Promise<boolean> {
+  if (!claimId || !status || !sig || !t) return false;
+  const ck = `${claimId}|${status}|${t}|${sig}`;
+  if (!statusCache.has(ck)) statusCache.set(ck, verify(`order|${claimId}|${status}|${t}`, sig));
+  if (!(await statusCache.get(ck))) { statusCache.delete(ck); return false; } // don't pin a failure (e.g. key not loaded yet)
+  const time = Number(t);
+  if (time < (newest.get(claimId) ?? 0)) return false;
+  newest.set(claimId, time);
+  return true;
 }

@@ -58,11 +58,11 @@ class OrderBubble extends HTMLElement {
     const raw = (this._m as any)?.message?.metadata ?? (this._m as any)?.metadata;
     const md: Record<string, string> = { ...(raw instanceof Map ? Object.fromEntries(raw) : raw || {}), ...this._md };
     // Only a server-signed status is shown (a buyer can edit its own message's metadata through the SDK).
-    const vkey = `${o.claimId}|${md.s}|${md.g}`;
+    const vkey = `${o.claimId}|${md.s}|${md.t}|${md.g}`;
     if (this._vkey !== vkey) {
       this._vkey = vkey;
-      this._okS = null;
-      verifyOrderStatus(o.claimId, md.s, md.g).then((ok) => { if (this._vkey === vkey) { this._okS = ok ? md.s! : null; this.render(); } });
+      // Keep the last verified status if this one is forged or older (a rollback); only ever show signed, newest state.
+      verifyOrderStatus(o.claimId, md.s, md.t, md.g).then((ok) => { if (ok && this._vkey === vkey) { this._okS = md.s!; this.render(); } });
     }
     const st = ORDER_STATUS[this._okS ?? ''];
     const chipColors = { sun: ['#fff1cc', '#6b4600'], mint: ['#0b8457', '#fff'], muted: ['#eadfd3', '#3a312a'], hot: ['#ffe6dc', '#d93a10'] } as const;

@@ -87,20 +87,21 @@ function Bubble({ m, peerId }: { m: RtMessage; peerId: string }) {
 }
 
 /** The status chip only shows a status the server signed: a buyer can edit its own message's metadata via the SDK. */
-function useSignedStatus(claimId: string, s?: string, g?: string) {
+function useSignedStatus(claimId: string, s?: string, t?: string, g?: string) {
   const [ok, setOk] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
-    verifyOrderStatus(claimId, s, g).then((v) => { if (alive) setOk(v ? s! : null); });
+    // Keep the last good status if a newer value fails (forged or rolled back); never fall back to showing it.
+    verifyOrderStatus(claimId, s, t, g).then((v) => { if (alive && v) setOk(s!); });
     return () => { alive = false; };
-  }, [claimId, s, g]);
+  }, [claimId, s, t, g]);
   return ok;
 }
 
 function OrderBubble({ m }: { m: RtMessage }) {
   {
     const o = m.content as OrderContent;
-    const st = ORDER_STATUS[useSignedStatus(o.claimId, m.meta?.s, m.meta?.g) ?? ''];
+    const st = ORDER_STATUS[useSignedStatus(o.claimId, m.meta?.s, m.meta?.t, m.meta?.g) ?? ''];
     const chip = st ? { sun: 'bg-sun-soft text-[#6b4600]', mint: 'bg-mint text-white', muted: 'bg-line text-ink-2', hot: 'bg-hot-soft text-hot-dark' }[st.tone] : '';
     return (
       <div className="anim-rise mx-auto w-full max-w-xs rounded-2xl border-2 border-mint/40 bg-mint-soft p-3">
