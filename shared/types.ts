@@ -92,7 +92,8 @@ export interface OrderContent {
 
 export interface OrderUpdateContent {
   claimId: string;
-  status: ClaimStatus;
+  /** A claim's status, or 'info' for account notices from ClaimIt (e.g. Pro is about to end) that aren't about an order. */
+  status: ClaimStatus | 'info';
   text: string;
 }
 

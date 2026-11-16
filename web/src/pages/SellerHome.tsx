@@ -298,7 +298,7 @@ function ProTeam({ shop, onAccount }: { shop: string; onAccount?: (a: SellerAcco
       {paySheet}
       {acct.proPending && !confirming && <div className="mb-3 rounded-2xl bg-sun-soft px-3 py-2 text-sm text-[#6b4600]">🔎 A payment of yours is under review. We'll add its Pro days once it's confirmed; no need to pay again.</div>}
       {confirming && <div className="mb-3 rounded-2xl bg-sun-soft px-3 py-2 text-sm text-[#6b4600]">⏳ Confirming your payment. Your new days are added by themselves as soon as it's confirmed; no need to pay again.</div>}
-      {daysLeft <= 5 && !confirming && (
+      {daysLeft <= 5 && !confirming && !acct.proPending && (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl bg-sun-soft px-3 py-2 text-sm">
           <span className="flex-1"><b>{acct.paidPro ? 'Pro' : 'Your free trial'} ends in {daysLeft} day{daysLeft === 1 ? '' : 's'}.</b> After that you're back on Free: co-hosts pause, nothing is lost.</span>
           <button className="btn bg-ink px-4 py-1.5 text-sm text-white" onClick={() => setPayOpen(true)}>{acct.paidPro ? 'Renew' : 'Keep Pro'}</button>

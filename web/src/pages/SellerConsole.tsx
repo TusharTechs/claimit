@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, ApiError, sessions, type SellerClaim, type SellerDrop } from '../api';
 import { rt, type RtMessage } from '../rt';
-import { Avatar, ConfirmSheet, CopyButton, ItemThumb, Logo, QR, Sheet, Spinner, StatusChip, useToasts } from '../components/ui';
-import { Play } from 'lucide-react';
+import { Avatar, ConfirmSheet, CopyButton, ItemThumb, Logo, LogoMark, QR, Sheet, Spinner, StatusChip, useToasts } from '../components/ui';
+import { ExternalLink, Play } from 'lucide-react';
 import { DMThread } from '../components/DMThread';
 import { chatUIReady, mountChatUI, openDirect, setupChatUI } from '../chatui';
 import { currencySymbol, mmss, money, resizeImage, setCurrency, telHref, useCountdown, useDebounced } from '../util';
@@ -105,7 +105,7 @@ export default function SellerConsole() {
         else if (m.type === MSG.EVENT) { const ev = m.content as EventContent; setFeed((f) => [...f.slice(-120), { id: m.id, text: ev.text, kind: ev.kind }]); refresh(); }
       } else if (m.kind === 'direct' && !m.mine) {
         if (!(tabRef.current === 'inbox' && peerRef.current === m.channelId)) setUnread((u) => ({ ...u, [m.channelId]: (u[m.channelId] || 0) + 1 }));
-        if (m.type === MSG.ORDER_UPDATE) toasts.push('💸 A buyer says they paid', 'mint');
+        if (m.type === MSG.ORDER_UPDATE && (m.content as { status?: string })?.status === 'paying') toasts.push('💸 A buyer says they paid', 'mint');
         refresh();
       }
     });
@@ -147,6 +147,15 @@ export default function SellerConsole() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // Re-render at a scheduled drop's start time so SOON flips without a reload. (Hooks must run before any early return.)
+  const [, tickAtStart] = useState(0);
+  const startsAtMs = data?.drop.startsAt ?? 0;
+  useEffect(() => {
+    if (startsAtMs <= Date.now()) return;
+    const t = setTimeout(() => tickAtStart((n) => n + 1), startsAtMs - Date.now() + 500);
+    return () => clearTimeout(t);
+  }, [startsAtMs]);
+
   if (!data) return <div className="grid min-h-full place-items-center"><Spinner className="size-8 text-hot" /></div>;
 
   const { drop, items, stats } = data;
@@ -163,13 +172,6 @@ export default function SellerConsole() {
   dropNextRef.current = () => { if (nextDraft) act(() => api.dropItem(drop.id, nextDraft.id), `Dropped #${nextDraft.idx} ${nextDraft.name}!`); };
 
   // A scheduled drop that hasn't started reads as "scheduled" everywhere the seller shares it, never "live now".
-  const [, tickAtStart] = useState(0);
-  useEffect(() => {
-    const at = drop?.startsAt ?? 0;
-    if (at <= Date.now()) return;
-    const t = setTimeout(() => tickAtStart((n) => n + 1), at - Date.now() + 500);
-    return () => clearTimeout(t);
-  }, [drop?.startsAt]);
   const upcoming = !!drop?.startsAt && drop.startsAt > Date.now() && !items.some((i) => i.status !== 'draft');
   const startingSoon = !upcoming && !items.some((i) => i.status !== 'draft'); // open, nothing dropped yet (same as the drop list)
   const whenText = drop?.startsAt ? new Date(drop.startsAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
@@ -178,17 +180,17 @@ export default function SellerConsole() {
     <div className="min-h-full pb-[calc(140px+env(safe-area-inset-bottom))] lg:pb-0">
       <header className="sticky top-0 z-30 border-b border-line bg-paper/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
-          <Link to="/sell"><Logo className="text-lg" /></Link>
+          <Link to="/sell" aria-label="ClaimIt home" className="shrink-0"><span className="sm:hidden"><LogoMark className="size-8" /></span><span className="hidden sm:inline"><Logo className="text-lg" /></span></Link>
           <div className="min-w-0 flex-1">
             <div className="truncate font-display text-lg font-bold leading-tight">{drop.title}</div>
             <div className="truncate text-xs text-muted">{drop.shop}</div>
           </div>
           {ended ? <span className="rounded-full bg-line px-2.5 py-1 text-xs font-bold">ENDED</span> : upcoming ? (
-            <span className="whitespace-nowrap rounded-full bg-sun-soft px-2.5 py-1 text-xs font-bold text-[#6b4600]">SCHEDULED · {new Date(drop.startsAt!).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</span>
+            <span className="whitespace-nowrap rounded-full bg-sun-soft px-2.5 py-1 text-xs font-bold text-[#6b4600]">SOON<span className="hidden sm:inline"> · {new Date(drop.startsAt!).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</span></span>
           ) : startingSoon ? (
-            <span className="whitespace-nowrap rounded-full bg-sun-soft px-2.5 py-1 text-xs font-bold text-[#6b4600]">STARTING SOON · drop your first item</span>
+            <span className="whitespace-nowrap rounded-full bg-sun-soft px-2.5 py-1 text-xs font-bold text-[#6b4600]">STARTING SOON<span className="hidden sm:inline"> · drop your first item</span></span>
           ) : (
-            <span className="flex items-center gap-1.5 whitespace-nowrap rounded-full bg-ink px-2.5 py-1 text-xs font-bold text-white"><span className="anim-live size-1.5 rounded-full bg-hot" />LIVE{viewers ? <> · {viewers}<span className="hidden sm:inline">&nbsp;in room</span></> : ''}</span>
+            <span className="flex items-center gap-1.5 whitespace-nowrap rounded-full bg-hot-dark px-2.5 py-1 text-xs font-bold text-white"><span className="anim-live size-1.5 rounded-full bg-white" />LIVE{viewers ? <> · {viewers}<span className="hidden sm:inline">&nbsp;in room</span></> : ''}</span>
           )}
           {chatUI && (
             <button onClick={() => openInbox()} className="btn relative bg-ink px-3 py-1.5 text-sm text-white">
@@ -196,7 +198,7 @@ export default function SellerConsole() {
               {totalUnread > 0 && <span className="absolute -right-1 -top-1 grid size-5 place-items-center rounded-full bg-hot-dark text-[11px]">{totalUnread}</span>}
             </button>
           )}
-          <a href={link} target="_blank" rel="noreferrer" className="btn whitespace-nowrap border-2 border-ink px-3 py-1.5 text-sm"><span className="sm:hidden">Buyer view ↗</span><span className="hidden sm:inline">Open buyer view ↗</span></a>
+          <a href={link} target="_blank" rel="noreferrer" aria-label="Open buyer view" title="Open buyer view" className="btn shrink-0 whitespace-nowrap border-2 border-ink px-2.5 py-1.5 text-sm sm:px-3"><ExternalLink className="size-4 sm:hidden" /><span className="hidden sm:inline">Open buyer view ↗</span></a>
         </div>
       </header>
 

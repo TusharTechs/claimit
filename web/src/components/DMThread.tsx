@@ -130,7 +130,13 @@ function OrderBubble({ m }: { m: RtMessage }) {
 function PlainBubble({ m }: { m: RtMessage }) {
   if (m.type === MSG.ORDER_UPDATE) {
     const u = m.content as OrderUpdateContent;
-    return <div className="mx-auto max-w-xs whitespace-pre-line rounded-xl bg-line/50 px-3 py-2 text-center text-[13px] text-ink-2">{u.text}</div>;
+    return (
+      <div className={`mx-auto max-w-xs whitespace-pre-line rounded-xl px-3 py-2 text-center text-[13px] ${u.status === 'info' ? 'bg-sun-soft text-[#6b4600]' : 'bg-line/50 text-ink-2'}`}>
+        {u.text.split(/(https?:\/\/\S+)/g).map((part, i) => /^https?:\/\//.test(part)
+          ? <a key={i} href={part} target="_blank" rel="noreferrer" className="font-semibold underline">{part.replace(/^https?:\/\//, '')}</a>
+          : <span key={i}>{part}</span>)}
+      </div>
+    );
   }
   const text = m.content?.text ?? m.content?.content ?? '';
   return (

@@ -175,6 +175,14 @@ export function republishLive() {
 
 export const publishItems = (dropId: string, itemIds: string[]) => publish(dropId, itemIds);
 
+/** An account notice from ClaimIt's system user to a shop (not about an order), sent through the same retrying queue. */
+export function sendShopNotice(sellerId: string, text: string, onSent: () => void) {
+  return enqueue(`dm:${sellerUserId(sellerId)}`, async () => {
+    await withRetry(() => nexconn.sendDirect(SYSTEM_USER, sellerUserId(sellerId), MSG.ORDER_UPDATE, { claimId: '', status: 'info', text } satisfies OrderUpdateContent, text));
+    onSent();
+  });
+}
+
 /** Let the demo (and anything else) publish extra drop-level state. */
 export function publishDrop(dropId: string, state: DropState) {
   return publish(dropId, [], { drop: JSON.stringify(state) });

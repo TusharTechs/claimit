@@ -10,7 +10,7 @@ import { presence } from './presence.ts';
 import crypto from 'node:crypto';
 import { CURRENCIES, MSG } from '../shared/types.ts';
 import {
-  AppError, SYSTEM_USER, republishLive, sweepEndedMetadata, sellerTrust, buyerMarkPaid, markShipped, claim, closeItem, dropItem, endDrop, logEvent, myClaims, publicDrop,
+  AppError, SYSTEM_USER, republishLive, sweepEndedMetadata, sellerTrust, sendShopNotice, buyerMarkPaid, markShipped, claim, closeItem, dropItem, endDrop, logEvent, myClaims, publicDrop,
   q, release, sellerConfirm, sellerUserId, startExpiryLoop, toItem,
 } from './engine.ts';
 import type { AppConfig } from '../shared/types.ts';
@@ -259,7 +259,6 @@ app.post('/api/dodo/webhook', (req, res) => {
   if (!ok) return res.status(401).json({ ok: false, error: 'bad_signature' });
   // Standard Webhooks retries reuse the webhook-id: handle each event exactly once.
   if (db.prepare('SELECT 1 FROM kv WHERE k = ?').get(`dodo_evt:${id}`)) return res.json({ ok: true, duplicate: true });
-  db.prepare('INSERT INTO kv (k, v) VALUES (?, ?)').run(`dodo_evt:${id}`, String(now()));
 
   const ev = req.body as { type?: string; data?: DodoPaymentData & { amount?: number } };
   const sellerId = ev.data?.metadata?.sellerId;
@@ -341,6 +340,7 @@ app.post('/api/dodo/webhook', (req, res) => {
       db.prepare('DELETE FROM kv WHERE k = ?').run(`clawback:${payId}`);
     });
   }
+  db.prepare('INSERT OR IGNORE INTO kv (k, v) VALUES (?, ?)').run(`dodo_evt:${id}`, String(now())); // processed: later retries are duplicates
   res.json({ ok: true });
 });
 /** The return page polls this: has the payment from *this* checkout arrived, and what did it buy? */
@@ -1206,10 +1206,10 @@ setInterval(() => {
   for (const s of soon) {
     const key = `pro_reminder:${s.id}:${s.pro_until}`;
     if (db.prepare('SELECT 1 FROM kv WHERE k = ?').get(key)) continue;
-    db.prepare('INSERT INTO kv (k, v) VALUES (?, ?)').run(key, String(now()));
-    const site = config.publicUrl || '';
+    const site = config.publicUrl || 'https://35-224-27-222.sslip.io';
     const text = `⏳ Your ClaimIt Pro ends on ${new Date(s.pro_until).toUTCString().slice(0, 16)}. Keep co-hosts, analytics and scheduled drops: ${site}/sell?pro=pay`;
-    nexconn.sendDirect(SYSTEM_USER, sellerUserId(s.id), MSG.ORDER_UPDATE, { claimId: '', status: 'paid', text }, text).catch((e) => console.error('[pro reminder]', e?.message));
+    // Recorded only after a successful send, so a failed send is tried again next hour.
+    sendShopNotice(s.id, text, () => db.prepare('INSERT OR IGNORE INTO kv (k, v) VALUES (?, ?)').run(key, String(now())));
   }
 }, 3600_000).unref?.();
 // Referral rewards mature after the dispute window, so check invited shops every hour (not only when a drop ends).

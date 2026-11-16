@@ -100,8 +100,11 @@ class OrderUpdateBubble extends HTMLElement {
     if (!this._m) return;
     if (!fromShop(this._m)) { this.innerHTML = FAKE; return; }
     const u = contentOf<OrderUpdateContent>(this._m);
-    const tone = u.status === 'paid' ? '#14a06a' : u.status === 'paying' ? '#8a5a00' : '#3a312a';
-    this.innerHTML = `<div style="font-family:Inter,system-ui,sans-serif;max-width:280px;white-space:pre-line;padding:8px 12px;border-radius:12px;background:#f5efe8;font-size:13px;color:${tone}">${esc(u.text)}</div>`;
+    const tone = u.status === 'info' ? '#6b4600' : u.status === 'paid' ? '#14a06a' : u.status === 'paying' ? '#8a5a00' : '#3a312a';
+    const bg = u.status === 'info' ? '#fff1cc' : '#f5efe8';
+    // Links in notices (e.g. "renew here") are tappable; everything else stays escaped text.
+    const html = esc(u.text).replace(/https?:\/\/[^\s<]+/g, (url) => `<a href="${url}" target="_blank" rel="noreferrer" style="color:inherit;text-decoration:underline;font-weight:600">${url.replace(/^https?:\/\//, '')}</a>`);
+    this.innerHTML = `<div style="font-family:Inter,system-ui,sans-serif;max-width:280px;white-space:pre-line;padding:8px 12px;border-radius:12px;background:${bg};font-size:13px;color:${tone}">${html}</div>`;
   }
 }
 

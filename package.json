@@ -10,6 +10,7 @@
     "start": "NODE_ENV=production tsx server/index.ts",
     "setup:nexconn": "tsx server/setup.ts",
     "typecheck": "tsc --noEmit -p .",
+    "lint": "eslint web/src",
     "seed:demo": "tsx scripts/demo-seed.ts",
     "test:race": "tsx scripts/race.ts",
     "test:billing": "tsx scripts/billing.ts",
@@ -44,8 +45,11 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.0",
+    "eslint": "^9.17.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
     "tailwindcss": "^4.1.11",
     "typescript": "^5.6.3",
+    "typescript-eslint": "^8.18.2",
     "vite": "^5.4.11"
   }
 }
