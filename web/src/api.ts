@@ -74,7 +74,7 @@ export interface ShopDrop { id: string; title: string; status: 'live' | 'ended';
 export interface Shop { id: string; shop: string; name: string; followers: number; orders: number; since: number; avgConfirmSec?: number | null; following: boolean; drops: ShopDrop[] }
 export interface Impact {
   sellers: number; drops: number; buyers: number; claimsSettled: number; contestedItems: number; itemsSold: number; gmvUsd: number;
-  demo?: { visitors: number; claimTaps: number; rounds: number }; proWaitlist?: number;
+  demo?: { visitors: number; claimTaps: number; humanWins: number }; proWaitlist?: number;
   liveNow: { id: string; title: string; shop: string }[];
 }
 

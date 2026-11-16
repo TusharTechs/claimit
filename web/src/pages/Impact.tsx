@@ -16,7 +16,7 @@ export function Counter({ value, format = (n: number) => n.toLocaleString('en') 
 const PILOT_THRESHOLD = 25;
 
 function Pilot({ d }: { d: ImpactT }) {
-  const demo = d.demo ?? { visitors: 0, claimTaps: 0, rounds: 0 };
+  const demo = d.demo ?? { visitors: 0, claimTaps: 0, humanWins: 0 };
   return (
     <>
       <div className="mt-8 rounded-[26px] border-2 border-dashed border-line bg-card p-6">
@@ -27,7 +27,7 @@ function Pilot({ d }: { d: ImpactT }) {
       </div>
       <h2 className="mt-10 text-xs font-bold uppercase tracking-wider text-muted">Meanwhile, in the always-on demo room (bots included, labelled)</h2>
       <div className="mt-3 grid gap-4 sm:grid-cols-3">
-        {([['People who tried the demo', demo.visitors], ['Claim taps by people', demo.claimTaps], ['Items raced for', demo.rounds]] as const).map(([label, value]) => (
+        {([['People who tried the demo', demo.visitors], ['Claim taps by people', demo.claimTaps], ['Times a person beat the bots', demo.humanWins]] as const).map(([label, value]) => (
           <div key={label} className="rounded-[26px] border border-line bg-card p-6 shadow-[var(--shadow-card)]">
             <div className="font-display text-5xl font-extrabold text-ink"><Counter value={value} /></div>
             <div className="mt-2 font-semibold">{label}</div>

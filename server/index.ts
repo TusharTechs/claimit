@@ -406,7 +406,7 @@ app.get('/api/impact', h(() => {
     demo: {
       visitors: one(`SELECT COUNT(DISTINCT user_id) FROM events WHERE drop_id = 'demo' AND kind = 'join'`),
       claimTaps: one(`SELECT COUNT(*) FROM events WHERE drop_id = 'demo' AND kind = 'claim_attempt' AND user_id NOT LIKE 'bot\\_%' ESCAPE '\\'`),
-      rounds: one(`SELECT COUNT(*) FROM events WHERE drop_id = 'demo' AND kind = 'drop'`),
+      humanWins: one(`SELECT COUNT(*) FROM claims WHERE drop_id = 'demo' AND status = 'paid' AND buyer_id NOT LIKE 'bot\\_%' ESCAPE '\\'`),
     },
     proWaitlist: one('SELECT COUNT(*) FROM pro_waitlist'),
     liveNow: (db.prepare(`SELECT d.id, d.title, s.shop FROM drops d JOIN sellers s ON s.id = d.seller_id
