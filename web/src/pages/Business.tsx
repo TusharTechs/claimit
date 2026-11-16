@@ -103,7 +103,7 @@ const BLOCKS: Block[] = [
       ['Later:', 'a team plan for agencies that run drops for several shops.'],
     ],
     live: [['Pricing', '/pricing']],
-    assume: 'Pro is a 30-day pass bought again each month (renewals stack); a Dodo subscription product would make renewal automatic.',
+    assume: 'Monthly auto-renewal is built and tested (subscription charges, cancellations and failed renewals). The live checkout sells a 30-day pass until the subscription product is switched on.',
   },
 ];
 

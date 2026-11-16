@@ -8,7 +8,7 @@ interface Payment { id: string; sellerId: string; shop: string; amount: number; 
 const daysFor = (usd: number, price: number) => Math.max(0, Math.min(30, Math.floor((30 * usd) / price + 1e-9)));
 /** For payments in a currency we couldn't price, the original amount is kept in the reference. */
 const original = (p: Payment) => /·\s*([\d.]+ [A-Z]{3}) \(unknown rate/.exec(p.ref)?.[1] ?? null;
-interface Revenue { shops: number; payingShops: number; mrrUsd: number; onTrial: number; trialToPaidPct: number | null; renewingShops: number; churnedShops: number; revenueUsd: number; refundRatePct: number }
+interface Revenue { shops: number; payingShops: number; mrrUsd: number; onTrial: number; trialToPaidPct: number | null; renewingShops: number; churnedShops: number; revenueUsd: number; refundRatePct: number; autoRenewing?: number }
 interface Report { sellerId: string; shop: string; buyerId: string; reason: string; text: string | null; status: string; created: number }
 
 const REASON: Record<string, string> = { no_item: "Paid, didn't get the item", payment_not_confirmed: 'Paid, never confirmed', scam: 'Asked to pay outside the order', other: 'Other' };
@@ -82,7 +82,7 @@ export default function Admin() {
                 {([
                   ['MRR', `$${data.revenue.mrrUsd.toFixed(2)}`, `${data.revenue.payingShops} paying shop${data.revenue.payingShops === 1 ? '' : 's'}`],
                   ['On trial', String(data.revenue.onTrial), `trial → paid ${data.revenue.trialToPaidPct ?? '—'}${data.revenue.trialToPaidPct != null ? '%' : ''}`],
-                  ['Renewing', String(data.revenue.renewingShops), `${data.revenue.churnedShops} lapsed after paying`],
+                  ['Renewing', String(data.revenue.renewingShops), `${data.revenue.autoRenewing ?? 0} on auto-renew · ${data.revenue.churnedShops} lapsed in 30 days`],
                   ['Collected', `$${data.revenue.revenueUsd.toFixed(2)}`, `refunds/disputes ${data.revenue.refundRatePct}%`],
                 ] as const).map(([k, v, sub]) => (
                   <div key={k} className="rounded-2xl border border-line bg-card p-3 shadow-[var(--shadow-card)]">

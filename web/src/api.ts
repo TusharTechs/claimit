@@ -13,7 +13,9 @@ export class ApiError extends Error {
 
 export interface SellerSession { id: string; key: string; name: string; shop: string; upi: string; currency?: string; payLink?: string | null; payNote?: string | null }
 export interface SellerAccount { role: 'owner' | 'cohost'; cohostName: string | null; pro: boolean; proUntil: number | null; trialUsed: boolean;
-  founding?: boolean; referred?: boolean; referrals?: number; proPrice?: number; paidPro?: boolean; proPending?: boolean }
+  founding?: boolean; referred?: boolean; referrals?: number; proPrice?: number; paidPro?: boolean; proPending?: boolean;
+  /** Auto-renewing Pro subscription, if any. */
+  sub?: { status: string; renewsAt: number | null; cancelAtEnd: boolean } | null }
 export interface Cohost { id: string; name: string; created: number }
 export interface Insights {
   currency: string; drops: number; sold: number; revenue: number; rescuedAllTime: number; rescuedThisMonth: number; pro: boolean; coversPro?: boolean;
@@ -94,7 +96,7 @@ export const api = {
     req<SellerSession & { userId: string; token: string }>('POST', '/api/sellers', b),
   sellerSession: () => req<SellerSession & SellerAccount & { userId: string; token: string }>('POST', '/api/seller/session', {}, 'seller'),
   reportShop: (sellerId: string, reason: string, text: string) => req('POST', `/api/shops/${sellerId}/report`, { reason, text }, 'buyer'),
-  proBilling: () => req<{ available: boolean; checkout?: string | null; testMode?: boolean; link: string | null; note: string | null; price: number; pending: { id: string; amount: number; ref: string; created: number } | null; proUntil: number | null }>('GET', '/api/seller/pro/billing', undefined, 'seller'),
+  proBilling: () => req<{ available: boolean; checkout?: string | null; testMode?: boolean; recurring?: boolean; link: string | null; note: string | null; price: number; pending: { id: string; amount: number; ref: string; created: number } | null; proUntil: number | null }>('GET', '/api/seller/pro/billing', undefined, 'seller'),
   proCheckout: (ref: string) => req<{ arrived: boolean; status: string | null; days: number; proUntil: number | null; wasTrial: boolean }>('GET', `/api/seller/pro/checkout/${encodeURIComponent(ref)}`, undefined, 'seller'),
   proPay: (ref: string) => req<{ id: string; status: string }>('POST', '/api/seller/pro/pay', { ref }, 'seller'),
   insights: () => req<Insights>('GET', '/api/seller/insights', undefined, 'seller'),

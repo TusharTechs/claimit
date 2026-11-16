@@ -25,5 +25,6 @@ export const config = {
     hosts: AREA_HOSTS[area] || AREA_HOSTS.SG,
   },
   /** With no Nexconn keys the app runs in a local mock mode (server-sent events) so it can be developed offline. */
-  mode: (appKey && appSecret ? 'nexconn' : 'mock') as 'nexconn' | 'mock',
+  // FORCE_MOCK=1 keeps the mock transport even with keys set, so the signed-webhook path can be tested offline.
+  mode: (appKey && appSecret && process.env.FORCE_MOCK !== '1' ? 'nexconn' : 'mock') as 'nexconn' | 'mock',
 };

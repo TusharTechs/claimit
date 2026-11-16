@@ -75,5 +75,33 @@ if (adminKey) {
   check((await days()) === 45, `approving it at $${price / 2} (half the price) adds 15 days`);
 }
 
+// --- Auto-renewing subscription (a second shop): payments add the time, subscription events track the state.
+const shop2 = await post('/api/sellers', { name: 'Sub', shop: `Sub Test ${Date.now() % 1e5}`, currency: 'USD', upi: 'https://paypal.me/subtest' });
+const H2 = { 'x-seller-id': shop2.id, 'x-seller-key': shop2.key };
+const sess2 = async () => post('/api/seller/session', {}, H2);
+const days2 = async () => { const x = (await sess2()).proUntil as number | null; return x && x > Date.now() ? Math.round((x - Date.now()) / 86_400_000) : 0; };
+const price2: number = (await sess2()).proPrice;
+const subId = `sub_${shop2.id}`;
+const meta2 = { sellerId: shop2.id, kind: 'claimit_pro' };
+const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString();
+
+await send('subscription.active', { subscription_id: subId, status: 'active', next_billing_date: inDays(31), cancel_at_next_billing_date: false, metadata: meta2 });
+await send('payment.succeeded', { payment_id: `s1_${u}`, subscription_id: subId, total_amount: Math.round(price2 * 100), currency: 'USD', metadata: meta2 });
+let a2 = await sess2();
+check((await days2()) === 31 && a2.sub?.status === 'active' && !a2.sub.cancelAtEnd && a2.sub.renewsAt > Date.now(), 'subscribing turns Pro on for the month and shows the renewal date');
+// A renewal charge carries only the subscription id (no checkout metadata): it must still reach the right shop.
+await send('payment.succeeded', { payment_id: `s2_${u}`, subscription_id: subId, total_amount: Math.round(price2 * 100), currency: 'USD' });
+await send('subscription.renewed', { subscription_id: subId, status: 'active', next_billing_date: inDays(62), cancel_at_next_billing_date: false });
+check((await days2()) === 62, 'a renewal charge identified only by its subscription id adds the next month');
+await send('subscription.on_hold', { subscription_id: subId, status: 'on_hold' });
+a2 = await sess2();
+check(a2.sub?.status === 'on_hold' && (await days2()) === 62, 'a failed renewal marks the subscription on hold without taking paid time away');
+await send('subscription.cancelled', { subscription_id: subId, status: 'cancelled', cancelled_at: new Date().toISOString() });
+a2 = await sess2();
+check(a2.sub?.status === 'cancelled' && a2.sub.cancelAtEnd && (await days2()) === 62, 'cancelling keeps the days already paid for');
+const before = await days();
+check((await send('payment.succeeded', { payment_id: `stray_${u}`, subscription_id: 'sub_nobody', total_amount: 900, currency: 'USD' })) === 200 && (await days()) === before,
+  'a charge for an unknown subscription is acknowledged and changes nothing');
+
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nAll billing checks passed.');
 process.exit(failed ? 1 : 0);

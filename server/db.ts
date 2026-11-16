@@ -167,6 +167,10 @@ addColumn('sellers', 'trial_used', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('sellers', 'founding', 'INTEGER NOT NULL DEFAULT 0'); // first 100 shops: 50% off Pro for a year
 addColumn('sellers', 'ref_by', 'TEXT'); // the shop that invited this one
 addColumn('sellers', 'ref_rewarded', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('sellers', 'sub_id', 'TEXT'); // Dodo subscription (auto-renewing Pro), if the shop subscribed
+addColumn('sellers', 'sub_status', 'TEXT'); // active | cancelled | on_hold | past_due | failed | expired | paused
+addColumn('sellers', 'sub_renews_at', 'INTEGER');
+addColumn('sellers', 'sub_cancel_at_end', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('drops', 'starts_at', 'INTEGER');
 addColumn('pro_payments', 'days', 'INTEGER NOT NULL DEFAULT 30'); // Pro days this payment granted (refunds take them back)
 addColumn('drops', 'meta_cleared', 'INTEGER NOT NULL DEFAULT 0'); // item metadata keys removed after the drop ended

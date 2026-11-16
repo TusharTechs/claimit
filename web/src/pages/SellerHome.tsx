@@ -270,6 +270,8 @@ function ProTeam({ shop, onAccount }: { shop: string; onAccount?: (a: SellerAcco
   }
   const paySheet = <ProPaySheet open={payOpen} onClose={() => { setPayOpen(false); load(); }} />;
   const daysLeft = acct.proUntil ? Math.ceil((acct.proUntil - Date.now()) / 86_400_000) : 0;
+  const autoRenews = acct.sub?.status === 'active' && !acct.sub.cancelAtEnd; // a live subscription: no renew prompts
+  const fmtDay = (ms: number) => new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   if (!acct.pro) {
     return (
       <>{paySheet}<section className="mt-6 flex flex-wrap items-start gap-3 rounded-[26px] bg-ink p-5 text-white">
@@ -298,7 +300,7 @@ function ProTeam({ shop, onAccount }: { shop: string; onAccount?: (a: SellerAcco
       {paySheet}
       {acct.proPending && !confirming && <div className="mb-3 rounded-2xl bg-sun-soft px-3 py-2 text-sm text-[#6b4600]">🔎 A payment of yours is under review. We'll add its Pro days once it's confirmed; no need to pay again.</div>}
       {confirming && <div className="mb-3 rounded-2xl bg-sun-soft px-3 py-2 text-sm text-[#6b4600]">⏳ Confirming your payment. Your new days are added by themselves as soon as it's confirmed; no need to pay again.</div>}
-      {daysLeft <= 5 && !confirming && !acct.proPending && (
+      {daysLeft <= 5 && !confirming && !acct.proPending && !autoRenews && (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl bg-sun-soft px-3 py-2 text-sm">
           <span className="flex-1"><b>{acct.paidPro ? 'Pro' : 'Your free trial'} ends in {daysLeft} day{daysLeft === 1 ? '' : 's'}.</b> After that you're back on Free: co-hosts pause, nothing is lost.</span>
           <button className="btn bg-ink px-4 py-1.5 text-sm text-white" onClick={() => setPayOpen(true)}>{acct.paidPro ? 'Renew' : 'Keep Pro'}</button>
@@ -309,8 +311,17 @@ function ProTeam({ shop, onAccount }: { shop: string; onAccount?: (a: SellerAcco
         <div className="font-display text-xl font-bold">Your team</div>
         {acct.founding && <span className="ml-auto rounded-full bg-sun px-2.5 py-1 text-xs font-bold text-ink">Founding</span>}
         <span className={`${acct.founding ? '' : 'ml-auto '}rounded-full bg-sun-soft px-2.5 py-1 text-xs font-bold text-[#6b4600]`}>PRO{acct.proUntil ? ` · until ${new Date(acct.proUntil).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : ''}</span>
-        {!acct.paidPro && daysLeft > 5 && <button className="text-xs font-semibold text-ink-2 underline" onClick={() => setPayOpen(true)}>Keep Pro after the trial</button>}
+        {!acct.paidPro && daysLeft > 5 && !autoRenews && <button className="text-xs font-semibold text-ink-2 underline" onClick={() => setPayOpen(true)}>Keep Pro after the trial</button>}
       </div>
+      {acct.sub && (autoRenews ? (
+        <p className="mt-1 text-sm font-semibold text-mint">↻ Renews automatically{acct.sub.renewsAt ? ` on ${fmtDay(acct.sub.renewsAt)}` : ''} · {money(acct.proPrice ?? 9, 'USD')}/month. Cancel anytime.</p>
+      ) : ['on_hold', 'past_due', 'failed'].includes(acct.sub.status) ? (
+        <p className="mt-1 flex flex-wrap items-center gap-2 text-sm font-semibold text-hot-dark">Your renewal payment didn't go through. Pro ends on {fmtDay(acct.proUntil ?? 0)} unless it's paid.
+          <button className="btn bg-ink px-3 py-1 text-xs text-white" onClick={() => setPayOpen(true)}>Pay now</button></p>
+      ) : (
+        <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-ink-2">Subscription cancelled. Pro stays on until {fmtDay(acct.proUntil ?? 0)}, then you're back on Free.
+          <button className="btn bg-ink px-3 py-1 text-xs text-white" onClick={() => setPayOpen(true)}>Subscribe again</button></p>
+      ))}
       <p className="mt-1 text-sm text-muted">Co-hosts use their own login link: they can drop items, confirm payments and ship. They can't change your plan or team.</p>
       <div className="mt-3 text-xs font-bold uppercase tracking-wider text-muted">Co-hosts · {team.length}/5</div>
       <ul className="mt-1.5 space-y-1.5">
@@ -422,13 +433,15 @@ function ProPaySheet({ open, onClose }: { open: boolean; onClose: () => void }) 
         <div className="pb-4"><p className="font-semibold">Thanks! We're confirming your payment (ref {b.pending.ref}).</p><p className="mt-1 text-sm text-muted">Pro turns on as soon as it's confirmed, usually within a day.</p></div>
       ) : b.checkout ? (
         <div className="space-y-3 pb-4">
-          <p className="text-ink-2"><b className="text-ink">{money(b.price, 'USD')} for 30 days</b> of Pro. Pro switches on automatically after payment. Renewals add 30 days, and if you don't renew you're simply back on Free.</p>
+          {b.recurring
+            ? <p className="text-ink-2"><b className="text-ink">{money(b.price, 'USD')} a month.</b> Pro switches on automatically after payment and renews each month. Cancel anytime: you keep Pro until the end of the month you paid for.</p>
+            : <p className="text-ink-2"><b className="text-ink">{money(b.price, 'USD')} for 30 days</b> of Pro. Pro switches on automatically after payment. Renewals add 30 days, and if you don't renew you're simply back on Free.</p>}
           {b.testMode && (
             <div className="rounded-xl bg-sun-soft p-3 text-sm text-[#6b4600]">
               <b>Test mode: no real money moves.</b> Pay with card <span className="font-mono">4242 4242 4242 4242</span>, expiry 06/32, CVV 123 (India: <span className="font-mono">4576 2389 1277 1450</span>, or UPI <span className="font-mono">success@upi</span>).
             </div>
           )}
-          <a className="btn w-full bg-mint py-3 text-white" href={b.checkout}>Pay {money(b.price, 'USD')} securely ↗</a>
+          <a className="btn w-full bg-mint py-3 text-white" href={b.checkout}>{b.recurring ? `Subscribe · ${money(b.price, 'USD')}/month ↗` : `Pay ${money(b.price, 'USD')} securely ↗`}</a>
           <p className="text-center text-xs text-muted">Checkout by Dodo Payments. ClaimIt never sees your card.</p>
         </div>
       ) : (

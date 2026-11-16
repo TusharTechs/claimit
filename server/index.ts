@@ -57,8 +57,9 @@ const str = (v: unknown, max: number, field: string, required = true) => {
 // ---------- auth helpers ----------
 
 type SellerAuth = { id: string; name: string; shop: string; upi: string; currency: string; pay_link: string | null; pay_note: string | null;
-  pro_until: number | null; trial_used: number; founding: number; ref_by: string | null; created: number; role: 'owner' | 'cohost'; cohostName: string | null; cohostId: string | null };
-const SELLER_COLS = 'id, name, shop, upi, currency, pay_link, pay_note, pro_until, trial_used, founding, ref_by, created';
+  pro_until: number | null; trial_used: number; founding: number; ref_by: string | null; created: number;
+  sub_id: string | null; sub_status: string | null; sub_renews_at: number | null; sub_cancel_at_end: number; role: 'owner' | 'cohost'; cohostName: string | null; cohostId: string | null };
+const SELLER_COLS = 'id, name, shop, upi, currency, pay_link, pay_note, pro_until, trial_used, founding, ref_by, created, sub_id, sub_status, sub_renews_at, sub_cancel_at_end';
 
 /** The shop's owner (seller key) or one of its co-hosts (own key, Pro). Never returns the owner's key. */
 function seller(req: Request): SellerAuth {
@@ -171,6 +172,8 @@ app.post('/api/seller/session', h(async (req) => {
     proPrice: proPriceFor(s), // founding sellers: 50% off for their first year of Pro
     paidPro: !!db.prepare(`SELECT 1 FROM pro_payments WHERE seller_id = ? AND status IN ('confirmed','partially_refunded')`).get(s.id),
     proPending: !!db.prepare(`SELECT 1 FROM pro_payments WHERE seller_id = ? AND status = 'pending'`).get(s.id),
+    // Auto-renewing Pro (Dodo subscription), if the shop subscribed: drives "renews on / cancelled / payment failed".
+    sub: s.sub_status ? { status: s.sub_status, renewsAt: s.sub_renews_at, cancelAtEnd: !!s.sub_cancel_at_end } : null,
     referred: !!s.ref_by, referrals: (db.prepare('SELECT COUNT(*) AS n FROM sellers WHERE ref_by = ?').get(s.id) as { n: number }).n,
     userId, token: await nexconn.token(userId, s.cohostName ? `${s.cohostName} (${s.shop} team)` : s.shop) };
 }));
@@ -226,10 +229,17 @@ app.get('/api/seller/pro/billing', h((req) => {
   const checkout = dodoCheckout(req, s);
   const pending = db.prepare(`SELECT id, amount, ref, created FROM pro_payments WHERE seller_id = ? AND status = 'pending' ORDER BY created DESC LIMIT 1`).get(s.id) ?? null;
   return { available: !!(checkout || b.link || b.note), checkout, testMode: !!checkout && dodo().test, link: b.link, note: b.note,
+    recurring: !!checkout && process.env.DODO_PRO_RECURRING === '1', // the Dodo product is a monthly subscription
     price: proPriceFor(s), pending, proUntil: s.pro_until };
 }));
 
-interface DodoPaymentData { payment_id?: string; total_amount?: number; currency?: string; settlement_amount?: number; settlement_currency?: string; metadata?: Record<string, string> }
+interface DodoPaymentData {
+  payment_id?: string; total_amount?: number; currency?: string; settlement_amount?: number; settlement_currency?: string; metadata?: Record<string, string>;
+  /** Set on every charge of a subscription (first payment and each renewal); null for one-off payments. */
+  subscription_id?: string | null;
+  // Subscription events:
+  status?: string; next_billing_date?: string; cancel_at_next_billing_date?: boolean; cancelled_at?: string | null;
+}
 /** Pro is priced in USD; the buyer may have paid in any currency (Dodo localises checkout), so normalise to USD. */
 const ZERO_DECIMAL = new Set(['JPY', 'KRW', 'VND', 'CLP', 'ISK', 'UGX']); // amounts already in whole units
 function toUsd(d: DodoPaymentData): number | null {
@@ -262,22 +272,44 @@ app.post('/api/dodo/webhook', (req, res) => {
 
   const ev = req.body as { type?: string; data?: DodoPaymentData & { amount?: number } };
   const sellerId = ev.data?.metadata?.sellerId;
-  const shop = sellerId ? (db.prepare(`SELECT ${SELLER_COLS} FROM sellers WHERE id = ?`).get(sellerId) as SellerAuth | undefined) : undefined;
-  if (ev.type === 'payment.succeeded' && shop && ev.data?.metadata?.kind === 'claimit_pro') {
-    const payId = String(ev.data.payment_id || id);
+  const subId = ev.data?.subscription_id || null;
+  // The checkout tags the shop in metadata. Renewal charges and subscription events may only carry the subscription id,
+  // so a subscription we've already linked to a shop identifies it too.
+  const viaSub = !sellerId && subId ? (db.prepare(`SELECT ${SELLER_COLS} FROM sellers WHERE sub_id = ?`).get(subId) as SellerAuth | undefined) : undefined;
+  const shop = viaSub ?? (sellerId ? (db.prepare(`SELECT ${SELLER_COLS} FROM sellers WHERE id = ?`).get(sellerId) as SellerAuth | undefined) : undefined);
+  const ours = !!viaSub || ev.data?.metadata?.kind === 'claimit_pro';
+
+  // Subscription lifecycle: who is subscribed, when it renews, whether it was cancelled or a renewal failed. Pro time
+  // itself always comes from payments (below), so a cancelled subscription keeps the days already paid for.
+  if (ev.type?.startsWith('subscription.') && shop && ours && subId) {
+    const kind = ev.type.slice('subscription.'.length);
+    const status = ev.data?.status || ({ renewed: 'active', unpaused: 'active' } as Record<string, string>)[kind] || kind;
+    const renews = ev.data?.next_billing_date ? Date.parse(ev.data.next_billing_date) : NaN;
+    // A different, older subscription's late events must not overwrite the shop's current one.
+    if (!shop.sub_id || shop.sub_id === subId || kind === 'active') {
+      db.prepare('UPDATE sellers SET sub_id = ?, sub_status = ?, sub_renews_at = COALESCE(?, sub_renews_at), sub_cancel_at_end = ? WHERE id = ?')
+        .run(subId, status, Number.isFinite(renews) ? renews : null, ev.data?.cancel_at_next_billing_date || status === 'cancelled' ? 1 : 0, shop.id);
+    }
+  }
+
+  if (ev.type === 'payment.succeeded' && shop && ours) {
+    const payId = String(ev.data!.payment_id || id);
+    // A subscription charge covers one calendar month, so it buys 31 days (one-off passes buy 30).
+    const period = subId ? 31 : 30;
+    if (subId && !shop.sub_id) db.prepare(`UPDATE sellers SET sub_id = ?, sub_status = COALESCE(sub_status, 'active') WHERE id = ?`).run(subId, shop.id);
     // The checkout link is public, so the amount decides the time: the shop's own price buys 30 days, less buys
     // proportionally less (e.g. a standard shop that pays the founding price gets 15 days).
-    const usd = toUsd(ev.data);
+    const usd = toUsd(ev.data!);
     const paidUsd = usd ?? 0;
-    const days = usd === null ? 0 : Math.max(0, Math.min(30, Math.floor((30 * paidUsd) / proPriceFor(shop) + 1e-9)));
+    const days = usd === null ? 0 : Math.max(0, Math.min(period, Math.floor((period * paidUsd) / proPriceFor(shop) + 1e-9)));
     tx(() => {
       // Idempotent: Dodo may deliver the same event more than once.
       if (db.prepare('SELECT 1 FROM pro_payments WHERE id = ?').get(payId)) return;
       // A currency we can't price goes to the operator queue (/admin) instead of being granted 0 days silently.
       const status = usd === null ? 'pending' : 'confirmed';
       db.prepare(`INSERT INTO pro_payments (id, seller_id, amount, ref, status, created, decided, days) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(payId, shop.id, paidUsd, `dodo${dodo().test ? ' (test)' : ''} ${payId}${usd === null ? ` · ${ev.data!.total_amount} ${ev.data!.currency} (unknown rate: review)` : days < 30 ? ` · ${days} days (partial amount)` : ''}`,
-          status, now(), status === 'confirmed' ? now() : null, status === 'confirmed' ? days : 30);
+        .run(payId, shop.id, paidUsd, `dodo${dodo().test ? ' (test)' : ''} ${payId}${usd === null ? ` · ${ev.data!.total_amount} ${ev.data!.currency} (unknown rate: review)` : days < period ? ` · ${days} days (partial amount)` : subId ? ' · subscription' : ''}`,
+          status, now(), status === 'confirmed' ? now() : null, status === 'confirmed' ? days : period);
       const ck = ev.data!.metadata?.checkout;
       if (ck) db.prepare('INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)').run(`checkout:${shop.id}:${ck}`, JSON.stringify({ payId, status, days }));
       if (status === 'pending') return;
@@ -932,7 +964,12 @@ export function moderateDirect(from: string, to: string, messageType: string) {
   // (A shop's server-sent cards may arrive without a recipient field, so those can't be failed closed here without
   // risking every real order card; the relationship check below and the clients' own sender checks cover them.)
   const fake = messageType.startsWith('CI:') && !from.startsWith('s_');
-  if (!to) { logEvent('', 'dm_unchecked', from); if (dmUnchecked++ < 5) console.warn('[direct pre-message] no recipient field; keys seen:', lastDirectKeys.join(',')); }
+  if (!to) {
+    logEvent('', 'dm_unchecked', from);
+    if (dmUnchecked++ < 5) console.warn('[direct pre-message] no recipient (channelId); keys seen:', lastDirectKeys.join(','));
+    // A buyer's message always has a recipient. Without one we can't check who it's for, so it isn't delivered.
+    if (!from.startsWith('s_')) return { pass: 0 };
+  }
   // Buyer ids are visible in the public queue, so buyers may only DM shops: no "pay me instead" DMs to people in line.
   const buyerToBuyer = !!to && !from.startsWith('s_') && !to.startsWith('s_');
   // Anyone can open a shop, so a shop may only message buyers it has a real relationship with (they claimed in one of
@@ -1003,7 +1040,8 @@ app.post('/api/nexconn/webhook', express.json({ limit: '1mb' }), (req, res) => {
   if (type === 'direct_channel:pre_messaging') {
     const e = data[0] || {};
     lastDirectKeys = Object.keys(e);
-    return res.json(moderateDirect(String(e.userId ?? e.fromUserId ?? ''), String(e.toUserId ?? e.targetId ?? e.channelId ?? ''), String(e.messageType ?? '')));
+    // Nexconn's pre-messaging payload for direct channels: `userId` is the sender, `channelId` the recipient's user id.
+    return res.json(moderateDirect(String(e.userId ?? ''), String(e.channelId ?? ''), String(e.messageType ?? '')));
   }
   if (type.endsWith(':pre_messaging')) return res.json({ pass: 1 });
   res.json({ ok: true });
@@ -1061,7 +1099,7 @@ app.get('/api/admin/revenue', h((req) => {
   admin(req);
   const shops = db.prepare(`SELECT s.id, s.founding, s.created, s.pro_until, s.trial_used,
       (SELECT COUNT(*) FROM pro_payments p WHERE p.seller_id = s.id AND p.status IN ('confirmed','partially_refunded')) AS paid,
-      (SELECT p.amount * 30.0 / MAX(p.days, 1) FROM pro_payments p WHERE p.seller_id = s.id AND p.status IN ('confirmed','partially_refunded') AND p.days > 0
+      (SELECT p.amount * 30.0 / MIN(MAX(p.days, 1), 30) FROM pro_payments p WHERE p.seller_id = s.id AND p.status IN ('confirmed','partially_refunded') AND p.days > 0
         ORDER BY p.created DESC LIMIT 1) AS monthly
     FROM sellers s WHERE s.id != 'demoshop'`).all() as { id: string; founding: number; created: number; pro_until: number | null; trial_used: number; paid: number; monthly: number | null }[];
   const t = now();
@@ -1076,6 +1114,7 @@ app.get('/api/admin/revenue', h((req) => {
     onTrial: shops.filter((s) => s.trial_used && !s.paid && (s.pro_until ?? 0) > t).length,
     trialToPaidPct: trialled.length ? Math.round((trialled.filter((s) => s.paid > 0).length / trialled.length) * 100) : null,
     renewingShops: everPaid.filter((s) => s.paid > 1).length, // paid more than once
+    autoRenewing: Number(Object.values(db.prepare(`SELECT COUNT(*) FROM sellers WHERE sub_status = 'active' AND sub_cancel_at_end = 0`).get() as object)[0] ?? 0),
     churnedShops: everPaid.filter((s) => (s.pro_until ?? 0) <= t && (s.pro_until ?? 0) > t - 30 * 86_400_000).length, // lapsed in the last 30 days
     revenueUsd: money(`SELECT COALESCE(SUM(amount),0) FROM pro_payments WHERE status IN ('confirmed','partially_refunded')`),
     refundRatePct: (() => { const all = money(`SELECT COUNT(*) FROM pro_payments WHERE status NOT IN ('pending','rejected')`); const bad = money(`SELECT COUNT(*) FROM pro_payments WHERE status IN ('refunded','partially_refunded','disputed')`); return all ? Math.round((bad / all) * 100) : 0; })(),
@@ -1202,7 +1241,8 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 startExpiryLoop();
 // Pro ends in ~3 days: ClaimIt's system account sends the shop a direct message with a one-tap renew link (once per end date).
 setInterval(() => {
-  const soon = db.prepare(`SELECT id, pro_until FROM sellers WHERE pro_until BETWEEN ? AND ?`).all(now() + 2 * 86_400_000, now() + 3 * 86_400_000) as { id: string; pro_until: number }[];
+  const soon = db.prepare(`SELECT id, pro_until FROM sellers WHERE pro_until BETWEEN ? AND ?
+    AND NOT (COALESCE(sub_status, '') = 'active' AND sub_cancel_at_end = 0)`).all(now() + 2 * 86_400_000, now() + 3 * 86_400_000) as { id: string; pro_until: number }[];
   for (const s of soon) {
     const key = `pro_reminder:${s.id}:${s.pro_until}`;
     if (db.prepare('SELECT 1 FROM kv WHERE k = ?').get(key)) continue;
