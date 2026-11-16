@@ -93,35 +93,6 @@ function addColumn(table: string, column: string, type: string) {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
   if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
 }
-addColumn('drops', 'hold_seconds', 'INTEGER');
-addColumn('buyers', 'phone', 'TEXT');
-addColumn('buyers', 'address', 'TEXT');
-addColumn('buyers', 'pincode', 'TEXT');
-addColumn('buyers', 'is_guest', 'INTEGER NOT NULL DEFAULT 0');
-addColumn('claims', 'ship_phone', 'TEXT');
-addColumn('claims', 'ship_address', 'TEXT');
-addColumn('claims', 'ship_pincode', 'TEXT');
-addColumn('events', 'ref', 'TEXT');
-addColumn('claims', 'order_msg_id', 'TEXT');
-addColumn('claims', 'pay_opened', 'INTEGER NOT NULL DEFAULT 0');
-addColumn('claims', 'shipped_at', 'INTEGER');
-addColumn('claims', 'tracking', 'TEXT');
-addColumn('claims', 'paying_at', 'INTEGER'); // when the buyer said "I've paid" (for confirm reminders)
-addColumn('claims', 'reminded', 'INTEGER NOT NULL DEFAULT 0');
-addColumn('sellers', 'phone', 'TEXT');
-addColumn('sellers', 'currency', "TEXT NOT NULL DEFAULT 'INR'");
-addColumn('sellers', 'pay_link', 'TEXT');
-addColumn('sellers', 'pay_note', 'TEXT');
-addColumn('sellers', 'pro_until', 'INTEGER'); // Pro is active while now < pro_until (trial or paid)
-addColumn('sellers', 'trial_used', 'INTEGER NOT NULL DEFAULT 0');
-addColumn('sellers', 'founding', 'INTEGER NOT NULL DEFAULT 0'); // first 100 shops: 50% off Pro for a year
-addColumn('sellers', 'ref_by', 'TEXT'); // the shop that invited this one
-addColumn('sellers', 'ref_rewarded', 'INTEGER NOT NULL DEFAULT 0');
-addColumn('drops', 'starts_at', 'INTEGER');
-addColumn('pro_payments', 'days', 'INTEGER NOT NULL DEFAULT 30'); // Pro days this payment granted (refunds take them back)
-addColumn('drops', 'meta_cleared', 'INTEGER NOT NULL DEFAULT 0'); // item metadata keys removed after the drop ended // scheduled start (Pro): buyers see a countdown and can add it to their calendar
-addColumn('shop_reports', 'status', "TEXT NOT NULL DEFAULT 'open'"); // open | upheld | dismissed (admin review) // account details (GCash number, bank account, Zelle email…)
-addColumn('drops', 'practice', 'INTEGER NOT NULL DEFAULT 0');
 db.exec(`
 CREATE TABLE IF NOT EXISTS follows (
   seller_id TEXT NOT NULL REFERENCES sellers(id),
@@ -170,6 +141,38 @@ CREATE TABLE IF NOT EXISTS feedback (
   created INTEGER NOT NULL
 );
 `);
+
+// Migrations run after every table exists, so a fresh database and an old one end up identical.
+addColumn('drops', 'hold_seconds', 'INTEGER');
+addColumn('buyers', 'phone', 'TEXT');
+addColumn('buyers', 'address', 'TEXT');
+addColumn('buyers', 'pincode', 'TEXT');
+addColumn('buyers', 'is_guest', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('claims', 'ship_phone', 'TEXT');
+addColumn('claims', 'ship_address', 'TEXT');
+addColumn('claims', 'ship_pincode', 'TEXT');
+addColumn('events', 'ref', 'TEXT');
+addColumn('claims', 'order_msg_id', 'TEXT');
+addColumn('claims', 'pay_opened', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('claims', 'shipped_at', 'INTEGER');
+addColumn('claims', 'tracking', 'TEXT');
+addColumn('claims', 'paying_at', 'INTEGER'); // when the buyer said "I've paid" (for confirm reminders)
+addColumn('claims', 'reminded', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('sellers', 'phone', 'TEXT');
+addColumn('sellers', 'currency', "TEXT NOT NULL DEFAULT 'INR'");
+addColumn('sellers', 'pay_link', 'TEXT');
+addColumn('sellers', 'pay_note', 'TEXT');
+addColumn('sellers', 'pro_until', 'INTEGER'); // Pro is active while now < pro_until (trial or paid)
+addColumn('sellers', 'trial_used', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('sellers', 'founding', 'INTEGER NOT NULL DEFAULT 0'); // first 100 shops: 50% off Pro for a year
+addColumn('sellers', 'ref_by', 'TEXT'); // the shop that invited this one
+addColumn('sellers', 'ref_rewarded', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('drops', 'starts_at', 'INTEGER');
+addColumn('pro_payments', 'days', 'INTEGER NOT NULL DEFAULT 30'); // Pro days this payment granted (refunds take them back)
+addColumn('drops', 'meta_cleared', 'INTEGER NOT NULL DEFAULT 0'); // item metadata keys removed after the drop ended
+addColumn('shop_reports', 'status', "TEXT NOT NULL DEFAULT 'open'"); // open | upheld | dismissed (admin review)
+addColumn('drops', 'practice', 'INTEGER NOT NULL DEFAULT 0');
+
 
 export function tx<T>(fn: () => T): T {
   db.exec('BEGIN IMMEDIATE');

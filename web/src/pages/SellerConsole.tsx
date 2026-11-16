@@ -171,6 +171,7 @@ export default function SellerConsole() {
     return () => clearTimeout(t);
   }, [drop?.startsAt]);
   const upcoming = !!drop?.startsAt && drop.startsAt > Date.now() && !items.some((i) => i.status !== 'draft');
+  const startingSoon = !upcoming && !!drop?.startsAt && !items.some((i) => i.status !== 'draft'); // time's up, nothing dropped yet
   const whenText = drop?.startsAt ? new Date(drop.startsAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
   const goPanel = (k: Tab) => { setTab(k); if (k === 'room') setRoomUnread(0); document.getElementById('seller-panel')?.scrollIntoView({ behavior: 'smooth' }); };
   return (
@@ -184,6 +185,8 @@ export default function SellerConsole() {
           </div>
           {ended ? <span className="rounded-full bg-line px-2.5 py-1 text-xs font-bold">ENDED</span> : upcoming ? (
             <span className="whitespace-nowrap rounded-full bg-sun-soft px-2.5 py-1 text-xs font-bold text-[#6b4600]">SCHEDULED · {new Date(drop.startsAt!).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</span>
+          ) : startingSoon ? (
+            <span className="whitespace-nowrap rounded-full bg-sun-soft px-2.5 py-1 text-xs font-bold text-[#6b4600]">STARTING SOON · drop your first item</span>
           ) : (
             <span className="flex items-center gap-1.5 whitespace-nowrap rounded-full bg-ink px-2.5 py-1 text-xs font-bold text-white"><span className="anim-live size-1.5 rounded-full bg-hot" />LIVE{viewers ? <> · {viewers}<span className="hidden sm:inline">&nbsp;in room</span></> : ''}</span>
           )}
@@ -221,7 +224,7 @@ export default function SellerConsole() {
               <div className="mt-2 flex flex-wrap gap-2">
                 <CopyButton text={link} label="Copy link" />
                 <a className="btn bg-[#075E54] px-4 py-2 text-sm text-white" target="_blank" rel="noreferrer"
-                  href={`https://wa.me/?text=${encodeURIComponent(upcoming ? `📅 ${drop.shop} drops ${whenText} — tap to get a reminder. First tap wins! ${link}` : `🔥 ${drop.shop} is dropping LIVE now — first tap wins! ${link}`)}`}>WhatsApp</a>
+                  href={`https://wa.me/?text=${encodeURIComponent(upcoming ? `📅 ${drop.shop} drops ${whenText} — tap to get a reminder. First tap wins! ${link}` : startingSoon ? `⏳ ${drop.shop}'s drop is starting any minute — open it now, first tap wins! ${link}` : `🔥 ${drop.shop} is dropping LIVE now — first tap wins! ${link}`)}`}>WhatsApp</a>
                 <button className="btn border-2 border-ink px-4 py-1.5 text-sm" onClick={() => act(() => api.downloadOrders(drop.id))}>Orders CSV</button>
                 <button className="btn border-2 border-line px-4 py-1.5 text-sm text-ink-2" onClick={() => setDeviceOpen(true)}>Use on another device</button>
               </div>
@@ -229,7 +232,7 @@ export default function SellerConsole() {
                 <summary className="cursor-pointer font-semibold">Copy for Instagram / WhatsApp</summary>
                 {[
                   ['Pinned comment', `🛍️ Don't comment MINE — tap here to claim, first tap wins & everyone sees the queue: ${link}`],
-                  ['Story link sticker', upcoming ? `DROP ${whenText.toUpperCase()} 📅 Tap for a reminder` : `LIVE DROP NOW 🔴 Tap to claim`],
+                  ['Story link sticker', upcoming ? `DROP ${whenText.toUpperCase()} 📅 Tap for a reminder` : startingSoon ? `DROP STARTING NOW ⏳ Tap to join` : `LIVE DROP NOW 🔴 Tap to claim`],
                   ['Say on your live', `“Link is in my pinned comment / story — open it in another tab, keep watching here, tap CLAIM when I say the number!”`],
                 ].map(([k, v]) => (
                   <div key={k} className="mt-2 flex items-start gap-2">

@@ -224,28 +224,34 @@ function ProTeam({ shop, onAccount }: { shop: string; onAccount?: (a: SellerAcco
       return;
     }
     const tid = toast.loading(status === 'processing' ? 'Your payment is processing (UPI and bank payments can take a minute)…' : 'Confirming your payment…');
-    let saved: { until: number | null; paidBefore: boolean } = { until: null, paidBefore: false };
-    try { saved = { ...saved, ...JSON.parse(localStorage.getItem('claimit.checkout') || '{}') }; } catch { /* ignore */ }
+    const ref = sp.get('checkout') || '';
+    setConfirming(true);
+    // Ask about this checkout's own payment (works on any device, and even if the webhook landed before we got back).
+    // Fast polling for a minute, then a slow poll for as long as the page is open.
     let n = 0;
-    let baseline: number | null = saved.until; // paid on another device? use Pro's end date as it is right now
-    const t = setInterval(async () => {
-      if (baseline === null) { try { baseline = (await api.sellerSession()).proUntil ?? 0; } catch { return; } }
-      saved.until = baseline;
+    let t: ReturnType<typeof setTimeout>;
+    const tick = async () => {
       try {
+        const r = ref ? await api.proCheckout(ref) : null;
         const a = await api.sellerSession();
-        // Done only when this payment's days have been added (the until date moved past where it stood at checkout).
-        if (a.pro && a.paidPro && (a.proUntil ?? 0) > (saved.until ?? 0) + 86_400_000) {
-          clearInterval(t);
+        const landed = r ? r.arrived : a.pro && a.paidPro;
+        if (landed) {
           try { localStorage.removeItem('claimit.checkout'); } catch { /* ignore */ }
-          const until = new Date(a.proUntil!).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-          toast.success(saved.paidBefore ? `Renewed: Pro now runs until ${until}.` : (saved.until ?? 0) > Date.now() ? `Paid: 30 days added after your trial. Pro runs until ${until}.` : `Pro is on until ${until}.`, { id: tid });
           setConfirming(false);
+          if (r?.status === 'pending') toast("Payment received. We're confirming the amount and will switch on Pro shortly.", { id: tid });
+          else {
+            const until = a.proUntil ? new Date(a.proUntil).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '';
+            toast.success(a.paidPro && r && r.days < 30 ? `${r.days} days of Pro added (partial amount). Pro runs until ${until}.` : `Payment confirmed. Pro runs until ${until}.`, { id: tid });
+          }
           load();
+          return;
         }
       } catch { /* retry */ }
-      if (++n > 20) { clearInterval(t); setConfirming(true); toast("Still confirming your payment. Pro will switch on as soon as it does.", { id: tid }); }
-    }, 2000);
-    return () => clearInterval(t);
+      if (++n === 30) toast('Still confirming your payment. Pro will switch on by itself as soon as it does.', { id: tid });
+      t = setTimeout(tick, n < 30 ? 2000 : 15_000);
+    };
+    t = setTimeout(tick, 1500);
+    return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const load = async () => {
@@ -289,7 +295,8 @@ function ProTeam({ shop, onAccount }: { shop: string; onAccount?: (a: SellerAcco
   return (
     <section className="mt-6 rounded-[26px] border border-line bg-card p-5 shadow-[var(--shadow-card)]">
       {paySheet}
-      {daysLeft <= 5 && (
+      {confirming && <div className="mb-3 rounded-2xl bg-sun-soft px-3 py-2 text-sm text-[#6b4600]">⏳ Confirming your payment. Your new days are added by themselves as soon as it's confirmed; no need to pay again.</div>}
+      {daysLeft <= 5 && !confirming && (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl bg-sun-soft px-3 py-2 text-sm">
           <span className="flex-1"><b>{acct.paidPro ? 'Pro' : 'Your free trial'} ends in {daysLeft} day{daysLeft === 1 ? '' : 's'}.</b> After that you're back on Free: co-hosts pause, nothing is lost.</span>
           <button className="btn bg-ink px-4 py-1.5 text-sm text-white" onClick={() => setPayOpen(true)}>{acct.paidPro ? 'Renew' : 'Keep Pro'}</button>

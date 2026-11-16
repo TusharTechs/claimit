@@ -39,6 +39,7 @@ export default function Admin() {
   const [busy, setBusy] = useState<string | null>(null);
   const [pending, setPending] = useState<{ id: string; question: string; run: () => Promise<unknown>; ok: string } | null>(null);
   const [busyLabel, setBusyLabel] = useState('');
+  const [usdFor, setUsdFor] = useState<Record<string, string>>({}); // operator-entered USD value per pending payment
   const act = (id: string, question: string, run: () => Promise<unknown>, ok: string, label = '') => { if (!busy) { setBusyLabel(label); setPending({ id, question, run, ok }); } };
   const confirmPending = async () => {
     if (!pending) return;
@@ -69,6 +70,9 @@ export default function Admin() {
               <button className="btn bg-white px-4 py-2 text-sm shadow-sm" onClick={() => load()}>Refresh</button>
               <button className="btn bg-white px-4 py-2 text-sm shadow-sm" onClick={() => { try { sessionStorage.removeItem('claimit.admin'); } catch { /* ignore */ } setKey(''); setDraft(''); setData(null); }}>Sign out</button>
             </div>
+            {!data.revenue && (
+              <p className="mt-4 text-sm text-muted">Revenue metrics couldn't load. <button className="font-semibold text-ink underline" onClick={() => load()}>Retry</button></p>
+            )}
             {data.revenue && (
               <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {([
@@ -93,8 +97,12 @@ export default function Admin() {
                 <li key={p.id} className="flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-card p-3">
                   <div className="min-w-0 flex-1"><div className="font-semibold">{p.shop} · ${p.amount}</div><div className="text-sm text-muted">ref {p.ref} · {when(p.created)}</div></div>
                   {p.status === 'pending' ? (
-                    <div className="flex gap-2">
-                      <button className="btn bg-mint px-4 py-2 text-sm text-white" disabled={!!busy} onClick={() => act(p.id, `Confirm ${p.shop}'s payment (ref ${p.ref})? This adds 30 days of Pro.`, () => call('POST', `/api/admin/payments/${p.id}/decide`, { confirm: true }), `${p.shop}: Pro extended`, 'Confirm')}>{busy === p.id && busyLabel === 'Confirm' ? <Spinner /> : 'Confirm'}</button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="flex items-center gap-1 text-sm text-muted">USD value
+                        <input className="input !w-24 !py-1.5 text-sm" inputMode="decimal" placeholder={String(p.amount || '')} value={usdFor[p.id] ?? ''}
+                          onChange={(e) => setUsdFor((m) => ({ ...m, [p.id]: e.target.value.replace(/[^\d.]/g, '') }))} aria-label={`USD value of ${p.shop}'s payment`} />
+                      </label>
+                      <button className="btn bg-mint px-4 py-2 text-sm text-white" disabled={!!busy} onClick={() => act(p.id, `Confirm ${p.shop}'s payment (ref ${p.ref})? This adds 30 days of Pro.`, () => call('POST', `/api/admin/payments/${p.id}/decide`, { confirm: true, usd: Number(usdFor[p.id]) || undefined }), `${p.shop}: Pro extended`, 'Confirm')}>{busy === p.id && busyLabel === 'Confirm' ? <Spinner /> : 'Confirm'}</button>
                       <button className="btn bg-paper px-4 py-2 text-sm" disabled={!!busy} onClick={() => act(p.id, `Reject ${p.shop}'s payment (ref ${p.ref})?`, () => call('POST', `/api/admin/payments/${p.id}/decide`, { confirm: false }), 'Rejected', 'Reject')}>{busy === p.id && busyLabel === 'Reject' ? <Spinner /> : 'Reject'}</button>
                     </div>
                   ) : badge(p.status)}

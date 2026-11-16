@@ -45,8 +45,12 @@ await send('dispute.opened', { payment_id: `full_${u}` });
 check((await days()) === 15, 'a dispute on the partly refunded payment takes back its remaining 15 days');
 await send('dispute.won', { payment_id: `full_${u}` });
 check((await days()) === 30, 'winning the dispute restores exactly the time it removed');
-await pay(`cad_${u}`, 1200, 'XYZ');
-check((await days()) === 30, 'a payment in a currency without a known rate grants nothing automatically (sent to /admin for review)');
+await send('refund.succeeded', { payment_id: `full_${u}`, amount: Math.round(price * 100), currency: 'USD' });
+check((await days()) === 15, 'refunding the rest after a won dispute takes back its remaining 15 days');
+await pay(`xyz_${u}`, 1200, 'XYZ');
+const bill = await (await fetch(B + '/api/seller/pro/billing', { headers: H })).json();
+check((await days()) === 15 && String(bill.pending?.ref || '').includes('review'), 'a payment in a currency without a known rate grants nothing and waits in the review queue');
+
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nAll billing checks passed.');
 process.exit(failed ? 1 : 0);

@@ -210,9 +210,11 @@ function dodoCheckout(req: Request, s: SellerAuth) {
   if (!base || !d.secret) return null;
   const site = config.publicUrl || `${req.protocol}://${req.get('host')}`;
   const u = new URL(base);
+  const checkoutRef = rid(12); // ties this checkout to the payment the webhook reports, on any device
   u.searchParams.set('quantity', '1');
-  u.searchParams.set('redirect_url', `${site}/sell?pro=return`);
+  u.searchParams.set('redirect_url', `${site}/sell?pro=return&checkout=${checkoutRef}`);
   u.searchParams.set('metadata_sellerId', s.id);
+  u.searchParams.set('metadata_checkout', checkoutRef);
   u.searchParams.set('metadata_kind', 'claimit_pro');
   return u.toString();
 }
@@ -273,6 +275,8 @@ app.post('/api/dodo/webhook', (req, res) => {
       db.prepare(`INSERT INTO pro_payments (id, seller_id, amount, ref, status, created, decided, days) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(payId, shop.id, paidUsd, `dodo${dodo().test ? ' (test)' : ''} ${payId}${usd === null ? ` · ${ev.data!.total_amount} ${ev.data!.currency} (unknown rate: review)` : days < 30 ? ` · ${days} days (partial amount)` : ''}`,
           status, now(), status === 'confirmed' ? now() : null, status === 'confirmed' ? days : 30);
+      const ck = ev.data!.metadata?.checkout;
+      if (ck) db.prepare('INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)').run(`checkout:${shop.id}:${ck}`, JSON.stringify({ payId, status, days }));
       if (status === 'pending') return;
       const cur = (db.prepare('SELECT pro_until FROM sellers WHERE id = ?').get(shop.id) as { pro_until: number | null }).pro_until ?? 0;
       db.prepare('UPDATE sellers SET pro_until = ? WHERE id = ?').run(Math.max(now(), cur) + days * 86_400_000, shop.id);
@@ -281,7 +285,9 @@ app.post('/api/dodo/webhook', (req, res) => {
   // A refund or a chargeback takes back the Pro time that payment bought (a partial refund, a proportional share).
   if (ev.type === 'refund.succeeded' || ev.type === 'dispute.opened') {
     const payId = String(ev.data?.payment_id || '');
-    const p = db.prepare(`SELECT seller_id, days, amount FROM pro_payments WHERE id = ? AND status IN ('confirmed','partially_refunded')`).get(payId) as { seller_id: string; days: number; amount: number } | undefined;
+    db.prepare(`UPDATE pro_payments SET status = ?, decided = ? WHERE id = ? AND status = 'pending'`)
+      .run(ev.type === 'refund.succeeded' ? 'refunded' : 'disputed', now(), payId); // never approvable after its money went back
+    const p = db.prepare(`SELECT seller_id, days, amount, status FROM pro_payments WHERE id = ? AND status IN ('confirmed','partially_refunded')`).get(payId) as { seller_id: string; days: number; amount: number; status: string } | undefined;
     if (p) {
       const refundUsd = ev.type === 'refund.succeeded' && typeof ev.data?.amount === 'number' ? (toUsd({ ...ev.data, total_amount: ev.data.amount }) ?? p.amount) : p.amount;
       const back = p.amount > 0 ? Math.min(p.days, Math.ceil((p.days * Math.min(refundUsd, p.amount)) / p.amount - 1e-9)) : p.days;
@@ -296,7 +302,7 @@ app.post('/api/dodo/webhook', (req, res) => {
         db.prepare(`UPDATE pro_payments SET status = ?, decided = ?, days = ?, amount = ? WHERE id = ?`)
           .run(ev.type === 'refund.succeeded' ? (full ? 'refunded' : 'partially_refunded') : 'disputed', now(), p.days - back,
             ev.type === 'refund.succeeded' ? Math.max(0, p.amount - Math.min(refundUsd, p.amount)) : p.amount, payId); // revenue keeps only what was kept
-        if (ev.type === 'dispute.opened') db.prepare('INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)').run(`clawback:${payId}`, JSON.stringify({ ms: removedMs, days: back }));
+        if (ev.type === 'dispute.opened') db.prepare('INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)').run(`clawback:${payId}`, JSON.stringify({ ms: removedMs, days: back, status: p.status }));
       });
     }
   }
@@ -305,9 +311,11 @@ app.post('/api/dodo/webhook', (req, res) => {
     const payId = String(ev.data?.payment_id || '');
     const p = db.prepare(`SELECT seller_id FROM pro_payments WHERE id = ? AND status = 'disputed'`).get(payId) as { seller_id: string } | undefined;
     const raw = (db.prepare('SELECT v FROM kv WHERE k = ?').get(`clawback:${payId}`) as { v: string } | undefined)?.v;
-    const cb = raw ? (JSON.parse(raw) as { ms: number; days: number }) : null;
+    // Older rows stored only a day count; newer ones store the exact milliseconds removed and the prior status.
+    const parsed = raw ? JSON.parse(raw) : null;
+    const cb = parsed === null ? null : typeof parsed === 'number' ? { ms: parsed * 86_400_000, days: parsed, status: 'confirmed' } : (parsed as { ms: number; days: number; status?: string });
     if (p && cb) tx(() => {
-      db.prepare(`UPDATE pro_payments SET status = 'confirmed', decided = ?, days = days + ? WHERE id = ?`).run(now(), cb.days, payId);
+      db.prepare(`UPDATE pro_payments SET status = ?, decided = ?, days = days + ? WHERE id = ?`).run(cb.status || 'confirmed', now(), cb.days ?? 0, payId);
       const cur = (db.prepare('SELECT pro_until FROM sellers WHERE id = ?').get(p.seller_id) as { pro_until: number | null }).pro_until ?? 0;
       if (cb.ms > 0) db.prepare('UPDATE sellers SET pro_until = ? WHERE id = ?').run(Math.max(now(), cur) + cb.ms, p.seller_id); // exactly what was removed
       db.prepare('DELETE FROM kv WHERE k = ?').run(`clawback:${payId}`);
@@ -315,6 +323,14 @@ app.post('/api/dodo/webhook', (req, res) => {
   }
   res.json({ ok: true });
 });
+/** The return page polls this: has the payment from *this* checkout arrived, and what did it buy? */
+app.get('/api/seller/pro/checkout/:ref', h((req) => {
+  const s = ownerOnly(req);
+  const row = (db.prepare('SELECT v FROM kv WHERE k = ?').get(`checkout:${s.id}:${String(req.params.ref).slice(0, 20)}`) as { v: string } | undefined)?.v;
+  const r = row ? (JSON.parse(row) as { status: string; days: number }) : null;
+  return { arrived: !!r, status: r?.status ?? null, days: r?.days ?? 0, proUntil: s.pro_until, wasTrial: !!s.trial_used };
+}));
+
 app.post('/api/seller/pro/pay', limit('propay', 10, 60 * 60_000), h((req) => {
   const s = ownerOnly(req);
   if (!proBilling().link && !proBilling().note) throw new AppError(409, 'NO_BILLING', 'Pro billing opens soon');
@@ -994,14 +1010,20 @@ app.post('/api/admin/payments/:id/decide', h((req) => {
   const p = db.prepare(`SELECT seller_id, status FROM pro_payments WHERE id = ?`).get(String(req.params.id)) as { seller_id: string; status: string } | undefined;
   if (!p || p.status !== 'pending') throw new AppError(409, 'BAD_STATE', 'Already decided');
   const ok = req.body.confirm === true;
+  // The operator states what the payment was worth in USD (needed for currencies we can't price automatically);
+  // that value buys proportional days, exactly like an automatic payment, and is what revenue records.
+  const shop = db.prepare(`SELECT ${SELLER_COLS} FROM sellers WHERE id = ?`).get(p.seller_id) as SellerAuth;
+  const row = db.prepare('SELECT amount FROM pro_payments WHERE id = ?').get(String(req.params.id)) as { amount: number };
+  const usd = Number.isFinite(Number(req.body.usd)) && Number(req.body.usd) > 0 ? Number(req.body.usd) : row.amount || proPriceFor(shop);
+  const days = Math.max(0, Math.min(30, Math.floor((30 * usd) / proPriceFor(shop) + 1e-9)));
   tx(() => {
-    db.prepare('UPDATE pro_payments SET status = ?, decided = ? WHERE id = ?').run(ok ? 'confirmed' : 'rejected', now(), String(req.params.id));
+    db.prepare('UPDATE pro_payments SET status = ?, decided = ?, amount = ?, days = ? WHERE id = ?').run(ok ? 'confirmed' : 'rejected', now(), ok ? usd : row.amount, ok ? days : 0, String(req.params.id));
     if (ok) {
       const cur = (db.prepare('SELECT pro_until FROM sellers WHERE id = ?').get(p.seller_id) as { pro_until: number | null }).pro_until ?? 0;
-      db.prepare('UPDATE sellers SET pro_until = ? WHERE id = ?').run(Math.max(now(), cur) + 30 * 86_400_000, p.seller_id); // renewals stack
+      db.prepare('UPDATE sellers SET pro_until = ? WHERE id = ?').run(Math.max(now(), cur) + days * 86_400_000, p.seller_id); // renewals stack
     }
   });
-  return { ok: true };
+  return { ok: true, days };
 }));
 
 app.post('/api/admin/reports/resolve', h((req) => {

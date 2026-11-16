@@ -152,7 +152,9 @@ function publish(dropId: string, itemIds: string[], extra: Record<string, string
   return enqueue(d.channel_id, () => {
     pendingWrites.delete(d.channel_id); // from here on, new changes start a fresh write
     const raw: Record<string, string> = { ...batch.extra };
-    for (const id of batch.ids) raw[itemKey(id)] = JSON.stringify(itemState(id));
+    const freed = clearing.has(dropId) || !!(q.drop(dropId) as { meta_cleared?: number } | undefined)?.meta_cleared;
+    if (!freed) for (const id of batch.ids) raw[itemKey(id)] = JSON.stringify(itemState(id));
+    if (!Object.keys(raw).length) return Promise.resolve();
     // Signed and bound to channel+key: viewers' SDKs can write metadata too, and clients ignore anything unsigned.
     // Drop-level state gets a strictly increasing version, so a replayed older (but genuinely signed) value is ignored.
     if (raw.drop) raw.drop = JSON.stringify({ ...JSON.parse(raw.drop), v: nextDropVersion() });
@@ -439,6 +441,7 @@ export function endDrop(dropId: string) {
   setTimeout(() => clearEndedMetadata(dropId), 10 * 60_000).unref?.();
 }
 
+const clearing = new Set<string>();
 function clearEndedMetadata(dropId: string) {
   const d = q.drop(dropId);
   if (!d || d.status !== 'ended') return;
@@ -446,6 +449,7 @@ function clearEndedMetadata(dropId: string) {
   const active = (db.prepare(`SELECT COUNT(*) AS n FROM claims WHERE drop_id = ? AND status IN ('holding','paying','waiting')`).get(dropId) as { n: number }).n;
   if (active && now() - ((d as { ended?: number | null }).ended ?? now()) < 24 * 3600_000) return; // the periodic sweep tries again later
   const keys = q.items(dropId).map((i) => itemKey(i.id));
+  clearing.add(dropId); // from now on no queued write re-adds item keys, even before the removal finishes
   enqueue(d.channel_id, async () => {
     await withRetry(() => nexconn.removeMetadata(d.channel_id, sellerUserId(d.seller_id), keys));
     db.prepare('UPDATE drops SET meta_cleared = 1 WHERE id = ?').run(dropId);
