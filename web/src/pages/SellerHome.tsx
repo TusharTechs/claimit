@@ -236,9 +236,9 @@ function ProTeam({ shop, onAccount }: { shop: string; onAccount?: (a: SellerAcco
         const a = await api.sellerSession();
         const landed = r ? r.arrived : a.pro && a.paidPro;
         if (landed) {
-          try { localStorage.removeItem('claimit.checkout'); } catch { /* ignore */ }
           setConfirming(false);
           if (r?.status === 'pending') toast("Payment received. We're confirming the amount and will switch on Pro shortly.", { id: tid });
+          else if (r && r.days === 0) toast("Payment received, but it didn't cover any Pro days. Contact us and we'll sort it out.", { id: tid });
           else {
             const until = a.proUntil ? new Date(a.proUntil).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '';
             toast.success(a.paidPro && r && r.days < 30 ? `${r.days} days of Pro added (partial amount). Pro runs until ${until}.` : `Payment confirmed. Pro runs until ${until}.`, { id: tid });
@@ -248,7 +248,7 @@ function ProTeam({ shop, onAccount }: { shop: string; onAccount?: (a: SellerAcco
         }
       } catch { /* retry */ }
       if (++n === 30) toast('Still confirming your payment. Pro will switch on by itself as soon as it does.', { id: tid });
-      t = setTimeout(tick, n < 30 ? 2000 : 15_000);
+      t = setTimeout(tick, n < 30 ? 2000 : document.hidden ? 60_000 : 15_000); // background tabs check rarely
     };
     t = setTimeout(tick, 1500);
     return () => clearTimeout(t);
@@ -268,7 +268,7 @@ function ProTeam({ shop, onAccount }: { shop: string; onAccount?: (a: SellerAcco
   if (acct.role === 'cohost') {
     return <div className="mt-6 rounded-2xl bg-sun-soft px-4 py-3 text-sm font-semibold">You're a co-host for {shop}{acct.cohostName ? ` (as ${acct.cohostName})` : ''}: you can run drops and confirm payments.</div>;
   }
-  const paySheet = <ProPaySheet open={payOpen} onClose={() => { setPayOpen(false); load(); }} paidBefore={acct.paidPro} />;
+  const paySheet = <ProPaySheet open={payOpen} onClose={() => { setPayOpen(false); load(); }} />;
   const daysLeft = acct.proUntil ? Math.ceil((acct.proUntil - Date.now()) / 86_400_000) : 0;
   if (!acct.pro) {
     return (
@@ -286,6 +286,7 @@ function ProTeam({ shop, onAccount }: { shop: string; onAccount?: (a: SellerAcco
               setBusy(true);
               try { await api.proTrial(); toast.success(`Pro trial started: ${trialDays} days free`); await load(); } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not start the trial'); } finally { setBusy(false); }
             }}>{busy ? <Spinner /> : `Start ${trialDays}-day free trial`}</button>}
+        {acct.proPending && !confirming && <div className="w-full rounded-xl bg-white/10 px-3 py-2 text-sm">🔎 A payment of yours is under review. Pro switches on once it's confirmed; no need to pay again.</div>}
         {confirming && <div className="w-full rounded-xl bg-white/10 px-3 py-2 text-sm">⏳ Confirming your payment. Pro switches on by itself as soon as it's confirmed; no need to pay again.</div>}
         {!acct.trialUsed && <button className="w-full text-center text-sm font-semibold text-white underline sm:w-auto sm:self-center" onClick={() => setPayOpen(true)}>or pay now · {money(acct.proPrice ?? 9, 'USD')}/mo</button>}
       </section></>
@@ -295,6 +296,7 @@ function ProTeam({ shop, onAccount }: { shop: string; onAccount?: (a: SellerAcco
   return (
     <section className="mt-6 rounded-[26px] border border-line bg-card p-5 shadow-[var(--shadow-card)]">
       {paySheet}
+      {acct.proPending && !confirming && <div className="mb-3 rounded-2xl bg-sun-soft px-3 py-2 text-sm text-[#6b4600]">🔎 A payment of yours is under review. We'll add its Pro days once it's confirmed; no need to pay again.</div>}
       {confirming && <div className="mb-3 rounded-2xl bg-sun-soft px-3 py-2 text-sm text-[#6b4600]">⏳ Confirming your payment. Your new days are added by themselves as soon as it's confirmed; no need to pay again.</div>}
       {daysLeft <= 5 && !confirming && (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl bg-sun-soft px-3 py-2 text-sm">
@@ -402,7 +404,7 @@ function InviteCard({ sellerId, shop }: { sellerId: string; shop: string }) {
 }
 
 /** Pay for Pro: ClaimIt's own payment link/account plus a reference; the operator confirms and 30 days are added. */
-function ProPaySheet({ open, onClose, paidBefore }: { open: boolean; onClose: () => void; paidBefore?: boolean }) {
+function ProPaySheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [b, setB] = useState<Awaited<ReturnType<typeof api.proBilling>> | null>(null);
   const [ref, setRef] = useState('');
   const [busy, setBusy] = useState(false);
@@ -416,6 +418,8 @@ function ProPaySheet({ open, onClose, paidBefore }: { open: boolean; onClose: ()
         <div className="pb-4"><p className="text-ink-2">Couldn't load payment details.</p><button className="btn mt-3 bg-ink px-5 py-2.5 text-white" onClick={loadBilling}>Try again</button></div>
       ) : !b ? <Spinner className="my-6 size-6 text-hot" /> : !b.available ? (
         <p className="pb-4 text-ink-2">Paid Pro opens soon. You'll keep every feature of Free in the meantime.</p>
+      ) : b.pending ? (
+        <div className="pb-4"><p className="font-semibold">Thanks! We're confirming your payment (ref {b.pending.ref}).</p><p className="mt-1 text-sm text-muted">Pro turns on as soon as it's confirmed, usually within a day.</p></div>
       ) : b.checkout ? (
         <div className="space-y-3 pb-4">
           <p className="text-ink-2"><b className="text-ink">{money(b.price, 'USD')} for 30 days</b> of Pro. Pro switches on automatically after payment. Renewals add 30 days, and if you don't renew you're simply back on Free.</p>
@@ -424,14 +428,9 @@ function ProPaySheet({ open, onClose, paidBefore }: { open: boolean; onClose: ()
               <b>Test mode: no real money moves.</b> Pay with card <span className="font-mono">4242 4242 4242 4242</span>, expiry 06/32, CVV 123 (India: <span className="font-mono">4576 2389 1277 1450</span>, or UPI <span className="font-mono">success@upi</span>).
             </div>
           )}
-          <a className="btn w-full bg-mint py-3 text-white" href={b.checkout} onClick={() => {
-            // Remember where Pro stood, so the return page can tell when this payment's days have landed.
-            try { localStorage.setItem('claimit.checkout', JSON.stringify({ until: b.proUntil ?? 0, paidBefore: !!paidBefore, at: Date.now() })); } catch { /* ignore */ }
-          }}>Pay {money(b.price, 'USD')} securely ↗</a>
+          <a className="btn w-full bg-mint py-3 text-white" href={b.checkout}>Pay {money(b.price, 'USD')} securely ↗</a>
           <p className="text-center text-xs text-muted">Checkout by Dodo Payments. ClaimIt never sees your card.</p>
         </div>
-      ) : b.pending ? (
-        <div className="pb-4"><p className="font-semibold">Thanks! We're confirming your payment (ref {b.pending.ref}).</p><p className="mt-1 text-sm text-muted">Pro turns on as soon as it's confirmed, usually within a day.</p></div>
       ) : (
         <form className="space-y-3 pb-4" onSubmit={async (e) => {
           e.preventDefault(); setBusy(true);

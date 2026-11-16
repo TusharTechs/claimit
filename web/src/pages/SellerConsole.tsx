@@ -171,7 +171,7 @@ export default function SellerConsole() {
     return () => clearTimeout(t);
   }, [drop?.startsAt]);
   const upcoming = !!drop?.startsAt && drop.startsAt > Date.now() && !items.some((i) => i.status !== 'draft');
-  const startingSoon = !upcoming && !!drop?.startsAt && !items.some((i) => i.status !== 'draft'); // time's up, nothing dropped yet
+  const startingSoon = !upcoming && !items.some((i) => i.status !== 'draft'); // open, nothing dropped yet (same as the drop list)
   const whenText = drop?.startsAt ? new Date(drop.startsAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
   const goPanel = (k: Tab) => { setTab(k); if (k === 'room') setRoomUnread(0); document.getElementById('seller-panel')?.scrollIntoView({ behavior: 'smooth' }); };
   return (

@@ -169,7 +169,8 @@ app.post('/api/seller/session', h(async (req) => {
   return { id: s.id, name: s.name, shop: s.shop, upi: s.upi, currency: s.currency, payLink: s.pay_link, payNote: s.pay_note,
     role: s.role, cohostName: s.cohostName, pro: isPro(s), proUntil: s.pro_until, trialUsed: !!s.trial_used, founding: foundingActive(s),
     proPrice: proPriceFor(s), // founding sellers: 50% off for their first year of Pro
-    paidPro: !!db.prepare(`SELECT 1 FROM pro_payments WHERE seller_id = ? AND status = 'confirmed'`).get(s.id),
+    paidPro: !!db.prepare(`SELECT 1 FROM pro_payments WHERE seller_id = ? AND status IN ('confirmed','partially_refunded')`).get(s.id),
+    proPending: !!db.prepare(`SELECT 1 FROM pro_payments WHERE seller_id = ? AND status = 'pending'`).get(s.id),
     referred: !!s.ref_by, referrals: (db.prepare('SELECT COUNT(*) AS n FROM sellers WHERE ref_by = ?').get(s.id) as { n: number }).n,
     userId, token: await nexconn.token(userId, s.cohostName ? `${s.cohostName} (${s.shop} team)` : s.shop) };
 }));
@@ -256,6 +257,9 @@ app.post('/api/dodo/webhook', (req, res) => {
     return ver === 'v1' && got.length === expected.length && crypto.timingSafeEqual(got, expected);
   });
   if (!ok) return res.status(401).json({ ok: false, error: 'bad_signature' });
+  // Standard Webhooks retries reuse the webhook-id: handle each event exactly once.
+  if (db.prepare('SELECT 1 FROM kv WHERE k = ?').get(`dodo_evt:${id}`)) return res.json({ ok: true, duplicate: true });
+  db.prepare('INSERT INTO kv (k, v) VALUES (?, ?)').run(`dodo_evt:${id}`, String(now()));
 
   const ev = req.body as { type?: string; data?: DodoPaymentData & { amount?: number } };
   const sellerId = ev.data?.metadata?.sellerId;
@@ -285,8 +289,24 @@ app.post('/api/dodo/webhook', (req, res) => {
   // A refund or a chargeback takes back the Pro time that payment bought (a partial refund, a proportional share).
   if (ev.type === 'refund.succeeded' || ev.type === 'dispute.opened') {
     const payId = String(ev.data?.payment_id || '');
-    db.prepare(`UPDATE pro_payments SET status = ?, decided = ? WHERE id = ? AND status = 'pending'`)
-      .run(ev.type === 'refund.succeeded' ? 'refunded' : 'disputed', now(), payId); // never approvable after its money went back
+    const pend = db.prepare(`UPDATE pro_payments SET status = ?, decided = ? WHERE id = ? AND status = 'pending'`)
+      .run(ev.type === 'refund.succeeded' ? 'refunded' : 'disputed', now(), payId).changes; // never approvable after its money went back
+    if (pend && ev.type === 'dispute.opened') db.prepare('INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)').run(`clawback:${payId}`, JSON.stringify({ ms: 0, days: 0, status: 'pending' }));
+    if (ev.type === 'refund.succeeded') {
+      // Refunded while disputed: the refunded share is gone for good, so a later won dispute restores only the rest.
+      const d = db.prepare(`SELECT amount FROM pro_payments WHERE id = ? AND status = 'disputed'`).get(payId) as { amount: number } | undefined;
+      const raw = (db.prepare('SELECT v FROM kv WHERE k = ?').get(`clawback:${payId}`) as { v: string } | undefined)?.v;
+      if (d && raw && typeof ev.data?.amount === 'number') {
+        const cb = JSON.parse(raw) as { ms: number; days: number; status?: string };
+        const refundUsd = toUsd({ ...ev.data, total_amount: ev.data.amount }) ?? d.amount;
+        const keep = d.amount > 0 ? Math.max(0, 1 - Math.min(refundUsd, d.amount) / d.amount) : 0;
+        tx(() => {
+          db.prepare('UPDATE pro_payments SET amount = ? WHERE id = ?').run(Math.max(0, d.amount - refundUsd), payId);
+          db.prepare('INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)').run(`clawback:${payId}`,
+            JSON.stringify({ ms: Math.floor(cb.ms * keep), days: Math.floor(cb.days * keep), status: keep > 0 ? 'partially_refunded' : 'refunded' }));
+        });
+      }
+    }
     const p = db.prepare(`SELECT seller_id, days, amount, status FROM pro_payments WHERE id = ? AND status IN ('confirmed','partially_refunded')`).get(payId) as { seller_id: string; days: number; amount: number; status: string } | undefined;
     if (p) {
       const refundUsd = ev.type === 'refund.succeeded' && typeof ev.data?.amount === 'number' ? (toUsd({ ...ev.data, total_amount: ev.data.amount }) ?? p.amount) : p.amount;
@@ -327,7 +347,8 @@ app.post('/api/dodo/webhook', (req, res) => {
 app.get('/api/seller/pro/checkout/:ref', h((req) => {
   const s = ownerOnly(req);
   const row = (db.prepare('SELECT v FROM kv WHERE k = ?').get(`checkout:${s.id}:${String(req.params.ref).slice(0, 20)}`) as { v: string } | undefined)?.v;
-  const r = row ? (JSON.parse(row) as { status: string; days: number }) : null;
+  const saved = row ? (JSON.parse(row) as { payId: string }) : null;
+  const r = saved ? (db.prepare('SELECT status, days FROM pro_payments WHERE id = ?').get(saved.payId) as { status: string; days: number } | undefined) : undefined;
   return { arrived: !!r, status: r?.status ?? null, days: r?.days ?? 0, proUntil: s.pro_until, wasTrial: !!s.trial_used };
 }));
 
@@ -336,7 +357,7 @@ app.post('/api/seller/pro/pay', limit('propay', 10, 60 * 60_000), h((req) => {
   if (!proBilling().link && !proBilling().note) throw new AppError(409, 'NO_BILLING', 'Pro billing opens soon');
   const ref = str(req.body.ref, 60, 'Payment reference');
   if (ref.length < 4) throw new AppError(400, 'BAD_REF', 'Add the transaction ID or the name you paid from');
-  if (db.prepare(`SELECT 1 FROM pro_payments WHERE seller_id = ? AND status = 'pending'`).get(s.id)) throw new AppError(409, 'PENDING', 'We are already confirming a payment from you');
+  if (db.prepare(`SELECT 1 FROM pro_payments WHERE seller_id = ? AND status = 'pending' AND ref NOT LIKE 'dodo%'`).get(s.id)) throw new AppError(409, 'PENDING', 'We are already confirming a payment from you');
   const id = rid(10);
   db.prepare('INSERT INTO pro_payments (id, seller_id, amount, ref, created) VALUES (?, ?, ?, ?, ?)').run(id, s.id, proPriceFor(s), ref, now());
   return { id, status: 'pending' };
@@ -1002,8 +1023,9 @@ app.get('/api/admin/reports', h((req) => {
 }));
 app.get('/api/admin/payments', h((req) => {
   admin(req);
-  return db.prepare(`SELECT p.id, p.seller_id AS sellerId, s.shop, p.amount, p.ref, p.status, p.created, s.pro_until AS proUntil FROM pro_payments p
-    JOIN sellers s ON s.id = p.seller_id ORDER BY p.status = 'pending' DESC, p.created DESC LIMIT 200`).all();
+  const rows = db.prepare(`SELECT p.id, p.seller_id AS sellerId, s.shop, p.amount, p.ref, p.status, p.created, s.pro_until AS proUntil, s.founding, s.created AS shopCreated
+    FROM pro_payments p JOIN sellers s ON s.id = p.seller_id ORDER BY p.status = 'pending' DESC, p.created DESC LIMIT 200`).all() as (Record<string, unknown> & { founding: number; shopCreated: number })[];
+  return rows.map(({ founding, shopCreated, ...r }) => ({ ...r, price: proPriceFor({ founding, created: shopCreated }) }));
 }));
 app.post('/api/admin/payments/:id/decide', h((req) => {
   admin(req);
@@ -1014,7 +1036,9 @@ app.post('/api/admin/payments/:id/decide', h((req) => {
   // that value buys proportional days, exactly like an automatic payment, and is what revenue records.
   const shop = db.prepare(`SELECT ${SELLER_COLS} FROM sellers WHERE id = ?`).get(p.seller_id) as SellerAuth;
   const row = db.prepare('SELECT amount FROM pro_payments WHERE id = ?').get(String(req.params.id)) as { amount: number };
-  const usd = Number.isFinite(Number(req.body.usd)) && Number(req.body.usd) > 0 ? Number(req.body.usd) : row.amount || proPriceFor(shop);
+  const given = Number.isFinite(Number(req.body.usd)) && Number(req.body.usd) > 0 ? Number(req.body.usd) : null;
+  if (ok && !given && !row.amount) throw new AppError(400, 'USD_REQUIRED', 'Enter what this payment was worth in USD');
+  const usd = given ?? row.amount;
   const days = Math.max(0, Math.min(30, Math.floor((30 * usd) / proPriceFor(shop) + 1e-9)));
   tx(() => {
     db.prepare('UPDATE pro_payments SET status = ?, decided = ?, amount = ?, days = ? WHERE id = ?').run(ok ? 'confirmed' : 'rejected', now(), ok ? usd : row.amount, ok ? days : 0, String(req.params.id));
@@ -1176,6 +1200,18 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 startExpiryLoop();
+// Pro ends in ~3 days: ClaimIt's system account sends the shop a direct message with a one-tap renew link (once per end date).
+setInterval(() => {
+  const soon = db.prepare(`SELECT id, pro_until FROM sellers WHERE pro_until BETWEEN ? AND ?`).all(now() + 2 * 86_400_000, now() + 3 * 86_400_000) as { id: string; pro_until: number }[];
+  for (const s of soon) {
+    const key = `pro_reminder:${s.id}:${s.pro_until}`;
+    if (db.prepare('SELECT 1 FROM kv WHERE k = ?').get(key)) continue;
+    db.prepare('INSERT INTO kv (k, v) VALUES (?, ?)').run(key, String(now()));
+    const site = config.publicUrl || '';
+    const text = `⏳ Your ClaimIt Pro ends on ${new Date(s.pro_until).toUTCString().slice(0, 16)}. Keep co-hosts, analytics and scheduled drops: ${site}/sell?pro=pay`;
+    nexconn.sendDirect(SYSTEM_USER, sellerUserId(s.id), MSG.ORDER_UPDATE, { claimId: '', status: 'paid', text }, text).catch((e) => console.error('[pro reminder]', e?.message));
+  }
+}, 3600_000).unref?.();
 // Referral rewards mature after the dispute window, so check invited shops every hour (not only when a drop ends).
 setInterval(() => {
   for (const { id } of db.prepare(`SELECT id FROM sellers WHERE ref_by IS NOT NULL AND ref_rewarded = 0`).all() as { id: string }[]) rewardReferrer(id);

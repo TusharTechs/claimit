@@ -3,7 +3,11 @@ import { Link } from 'react-router-dom';
 import { ConfirmSheet, Logo, Spinner, useToasts } from '../components/ui';
 
 // Operator console: confirm Pro payments and review shop reports. Protected by ADMIN_KEY (kept in this tab only).
-interface Payment { id: string; sellerId: string; shop: string; amount: number; ref: string; status: string; created: number; proUntil: number | null }
+interface Payment { id: string; sellerId: string; shop: string; amount: number; ref: string; status: string; created: number; proUntil: number | null; price: number }
+/** Days a USD value buys at the shop's current price (same rule as the server). */
+const daysFor = (usd: number, price: number) => Math.max(0, Math.min(30, Math.floor((30 * usd) / price + 1e-9)));
+/** For payments in a currency we couldn't price, the original amount is kept in the reference. */
+const original = (p: Payment) => /·\s*([\d.]+ [A-Z]{3}) \(unknown rate/.exec(p.ref)?.[1] ?? null;
 interface Revenue { shops: number; payingShops: number; mrrUsd: number; onTrial: number; trialToPaidPct: number | null; renewingShops: number; churnedShops: number; revenueUsd: number; refundRatePct: number }
 interface Report { sellerId: string; shop: string; buyerId: string; reason: string; text: string | null; status: string; created: number }
 
@@ -95,14 +99,14 @@ export default function Admin() {
               {data.payments.length === 0 && <li className="text-sm text-muted">No payments yet.</li>}
               {data.payments.map((p) => (
                 <li key={p.id} className="flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-card p-3">
-                  <div className="min-w-0 flex-1"><div className="font-semibold">{p.shop} · ${p.amount}</div><div className="text-sm text-muted">ref {p.ref} · {when(p.created)}</div></div>
+                  <div className="min-w-0 flex-1"><div className="font-semibold">{p.shop} · {original(p) ? `${original(p)} (needs a USD value)` : `$${p.amount}`}</div><div className="text-sm text-muted">ref {p.ref} · {when(p.created)}</div></div>
                   {p.status === 'pending' ? (
                     <div className="flex flex-wrap items-center gap-2">
                       <label className="flex items-center gap-1 text-sm text-muted">USD value
-                        <input className="input !w-24 !py-1.5 text-sm" inputMode="decimal" placeholder={String(p.amount || '')} value={usdFor[p.id] ?? ''}
+                        <input className="input !w-24 !py-1.5 text-sm" inputMode="decimal" placeholder={p.amount ? String(p.amount) : 'required'} value={usdFor[p.id] ?? ''}
                           onChange={(e) => setUsdFor((m) => ({ ...m, [p.id]: e.target.value.replace(/[^\d.]/g, '') }))} aria-label={`USD value of ${p.shop}'s payment`} />
                       </label>
-                      <button className="btn bg-mint px-4 py-2 text-sm text-white" disabled={!!busy} onClick={() => act(p.id, `Confirm ${p.shop}'s payment (ref ${p.ref})? This adds 30 days of Pro.`, () => call('POST', `/api/admin/payments/${p.id}/decide`, { confirm: true, usd: Number(usdFor[p.id]) || undefined }), `${p.shop}: Pro extended`, 'Confirm')}>{busy === p.id && busyLabel === 'Confirm' ? <Spinner /> : 'Confirm'}</button>
+                      <button className="btn bg-mint px-4 py-2 text-sm text-white" disabled={!!busy || (!p.amount && !(Number(usdFor[p.id]) > 0))} onClick={() => act(p.id, `Confirm ${p.shop}'s payment worth $${Number(usdFor[p.id]) || p.amount}? At their price ($${p.price}/month) that adds ${daysFor(Number(usdFor[p.id]) || p.amount, p.price)} days of Pro.`, () => call('POST', `/api/admin/payments/${p.id}/decide`, { confirm: true, usd: Number(usdFor[p.id]) || undefined }), `${p.shop}: Pro extended`, 'Confirm')}>{busy === p.id && busyLabel === 'Confirm' ? <Spinner /> : 'Confirm'}</button>
                       <button className="btn bg-paper px-4 py-2 text-sm" disabled={!!busy} onClick={() => act(p.id, `Reject ${p.shop}'s payment (ref ${p.ref})?`, () => call('POST', `/api/admin/payments/${p.id}/decide`, { confirm: false }), 'Rejected', 'Reject')}>{busy === p.id && busyLabel === 'Reject' ? <Spinner /> : 'Reject'}</button>
                     </div>
                   ) : badge(p.status)}
