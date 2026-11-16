@@ -81,6 +81,8 @@ body {
 [data-sonner-toast].claimit-toast[data-type="success"] { background: var(--color-mint); }
 [data-sonner-toast].claimit-toast.claimit-toast-hot { background: var(--color-hot-dark); }
 [data-sonner-toast].claimit-toast [data-icon] { color: #fff; }
+/* Toasts are status pills with no buttons: taps pass straight through, so one can never sit on top of Claim or a form field and eat the tap. */
+[data-sonner-toaster], [data-sonner-toast].claimit-toast { pointer-events: none; }
 
 @keyframes shrink { from { transform: scaleX(1) } to { transform: scaleX(0) } }
 @keyframes urgent { 0%, 100% { opacity: 1 } 50% { opacity: 0.55 } }

@@ -22,6 +22,8 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
     <Toaster position="bottom-center" offset="calc(124px + env(safe-area-inset-bottom))" visibleToasts={2} duration={2800}
+      /* Phones use a separate offset in sonner: without it toasts sat on top of the Claim button. */
+      mobileOffset={{ bottom: 'calc(136px + env(safe-area-inset-bottom))', left: 16, right: 16 }}
       toastOptions={{ className: 'claimit-toast', style: { fontFamily: 'Inter, system-ui, sans-serif', fontWeight: 600, borderRadius: 999 } }} />
     <MotionConfig reducedMotion="user">
     <BrowserRouter>

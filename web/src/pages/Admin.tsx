@@ -20,6 +20,7 @@ export default function Admin() {
   const [data, setData] = useState<{ payments: Payment[]; reports: Report[]; revenue?: Revenue } | null>(null);
   const [err, setErr] = useState('');
   const toasts = useToasts();
+  const feedOnly = new URLSearchParams(location.search).get('feed') === '1'; // only the live Nexconn feed, full height
 
   const call = useCallback(async (method: string, path: string, body?: unknown) => {
     const res = await fetch(path, { method, headers: { 'x-admin-key': key, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
@@ -67,7 +68,7 @@ export default function Admin() {
             <input id="admin-key" className="input" type="password" value={draft} onChange={(e) => setDraft(e.target.value)} autoComplete="off" />
             <button className="btn w-full bg-ink py-3 text-white" disabled={draft.length < 8}>Open</button>
           </form>
-        ) : !data ? <Spinner className="mt-10 size-8 text-hot" /> : (
+        ) : !data ? <Spinner className="mt-10 size-8 text-hot" /> : feedOnly ? <NexconnFeed call={call} full /> : (
           <>
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <h1 className="flex-1 font-display text-4xl font-extrabold">Operator</h1>
@@ -144,7 +145,7 @@ export default function Admin() {
 interface Activity { t: number; dir: 'api' | 'webhook'; what: string; ms?: number; code?: number | string; note?: string }
 
 /** Live feed of the conversation between ClaimIt's server and Nexconn: Platform API calls out, webhooks in. */
-function NexconnFeed({ call }: { call: (method: string, path: string) => Promise<{ mode: string; now: number; events: Activity[] }> }) {
+function NexconnFeed({ call, full = false }: { call: (method: string, path: string) => Promise<{ mode: string; now: number; events: Activity[] }>; full?: boolean }) {
   const [events, setEvents] = useState<Activity[]>([]);
   const [mode, setMode] = useState('');
   useEffect(() => {
@@ -166,7 +167,7 @@ function NexconnFeed({ call }: { call: (method: string, path: string) => Promise
     <section className="mt-6">
       <h2 className="flex items-center gap-2 font-display text-2xl font-extrabold">Nexconn activity <span className="flex items-center gap-1.5 rounded-full bg-ink px-2.5 py-1 text-xs font-bold text-white"><span className="anim-live size-1.5 rounded-full bg-hot" />LIVE</span></h2>
       <p className="text-sm text-muted">Every Platform API call this server makes and every webhook Nexconn sends it{mode === 'mock' ? ' (mock mode: no calls leave this machine)' : ''}.</p>
-      <div className="scroll-thin mt-3 h-72 overflow-y-auto rounded-2xl bg-ink p-3 font-mono text-[12px] leading-relaxed text-white/90">
+      <div className={`scroll-thin mt-3 overflow-y-auto rounded-2xl bg-ink p-3 font-mono leading-relaxed text-white/90 ${full ? 'h-[calc(100dvh-210px)] text-[13px]' : 'h-72 text-[12px]'}`}>
         {events.length === 0 && <div className="text-white/50">Waiting for activity…</div>}
         {[...events].reverse().map((e, i) => (
           <div key={`${e.t}-${i}`} className="flex gap-2 whitespace-nowrap">

@@ -330,7 +330,7 @@ export default function Room() {
         ) : (
           <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-2.5 py-1 text-xs font-bold text-white">
             <span className={`size-1.5 rounded-full ${scheduled ? 'bg-sun' : connected && online ? 'anim-live bg-hot' : 'bg-white/40'}`} />
-            {scheduled ? 'SOON' : 'LIVE'}{viewers && viewers >= 3 ? ` · ${viewers} watching` : ''}
+            {scheduled ? 'SOON' : 'LIVE'}{viewers && viewers >= 3 ? <> · {viewers}<span className="hidden min-[430px]:inline">&nbsp;watching</span></> : ''}
           </span>
         )}
         <button onClick={share} className="grid size-10 shrink-0 place-items-center rounded-full bg-white shadow-sm" aria-label="Share this drop">

@@ -12,3 +12,11 @@ nexconn-hackathon-report.md
 research/
 *report*.md
 data-mock
+
+# demo video working files
+demo-video/node_modules
+demo-video/raw
+demo-video/out
+demo-video/public/raw
+demo-video/voice/models
+demo-video/public/vo
