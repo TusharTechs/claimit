@@ -163,6 +163,13 @@ export default function SellerConsole() {
   dropNextRef.current = () => { if (nextDraft) act(() => api.dropItem(drop.id, nextDraft.id), `Dropped #${nextDraft.idx} ${nextDraft.name}!`); };
 
   // A scheduled drop that hasn't started reads as "scheduled" everywhere the seller shares it, never "live now".
+  const [, tickAtStart] = useState(0);
+  useEffect(() => {
+    const at = drop?.startsAt ?? 0;
+    if (at <= Date.now()) return;
+    const t = setTimeout(() => tickAtStart((n) => n + 1), at - Date.now() + 500);
+    return () => clearTimeout(t);
+  }, [drop?.startsAt]);
   const upcoming = !!drop?.startsAt && drop.startsAt > Date.now() && !items.some((i) => i.status !== 'draft');
   const whenText = drop?.startsAt ? new Date(drop.startsAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
   const goPanel = (k: Tab) => { setTab(k); if (k === 'room') setRoomUnread(0); document.getElementById('seller-panel')?.scrollIntoView({ behavior: 'smooth' }); };

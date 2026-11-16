@@ -139,6 +139,10 @@ if (cfg.mode === 'mock') {
   const dm = async (to: string, type: string) => (await call('POST', '/api/mock/send-direct', { to, type, content: { text: 'pay me here instead' } }, { 'x-mock-token': `mock:${b9.id}` })).json;
   check((await dm(b10.id, 'CI:Text')).blocked === true, 'a buyer cannot DM another buyer');
   check((await dm(`s_${s.id}`, 'CI:Order')).blocked === true, 'a buyer cannot send a fake order card to a shop');
+  const stranger = (await call('POST', '/api/sellers', { name: 'Stranger', shop: 'Stranger Shop', currency: 'USD', upi: 'https://paypal.me/strangershop' })).json;
+  const asShop = async (shopId: string, to: string) => (await call('POST', '/api/mock/send-direct', { to, type: 'CI:Text', content: { text: 'hi' } }, { 'x-mock-token': `mock:s_${shopId}` })).json;
+  check((await asShop(stranger.id, b4.id)).blocked === true, 'a shop the buyer never bought from or followed cannot DM them');
+  check(!!(await asShop(s.id, b4.id)).messageId, "the buyer's own shop can DM them");
   await call('POST', `/api/seller/drops/${scamDrop.id}/end`, {}, sh);
 }
 

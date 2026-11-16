@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { rt, type RtMessage } from '../rt';
+import { toast } from 'sonner';
 import { MSG, ORDER_STATUS, type OrderContent, type OrderUpdateContent } from '../../../shared/types';
 import { verifyOrderStatus } from '../verify';
 import { money } from '../util';
@@ -38,8 +39,13 @@ export function DMThread({ peerId, peerName, onActivity, compact = false }: {
     const t = text.trim();
     if (!t) return;
     setText('');
-    const sent = await rt.sendDirect(peerId, MSG.TEXT, { text: t });
-    if (sent) setMsgs((x) => [...x, sent]);
+    try {
+      const sent = await rt.sendDirect(peerId, MSG.TEXT, { text: t });
+      if (sent) setMsgs((x) => [...x, sent]);
+    } catch (e) {
+      setText(t); // keep what they typed
+      toast.error(e instanceof Error && e.message === 'NOT_SENT' ? "This message can't be sent here. Order chats are between you and the shop." : "Couldn't send. Check your connection and try again.");
+    }
   };
 
   return (

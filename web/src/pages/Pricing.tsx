@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Check, Sparkles } from 'lucide-react';
 import { api, sessions, type SellerAccount } from '../api';
+import { money } from '../util';
 import { Logo, Spinner, celebrate, useToasts } from '../components/ui';
 
 const FREE = [
@@ -52,14 +53,14 @@ export default function Pricing() {
             {acct?.founding
               ? <div className="mt-2 font-display text-5xl font-extrabold">$4.50<span className="text-xl font-bold text-white/70">/month</span> <span className="align-middle text-lg font-bold text-white/60 line-through">$9</span><div className="text-sm font-semibold text-sun">Your founding-seller price for year one</div></div>
               : <div className="mt-2 font-display text-5xl font-extrabold">$9<span className="text-xl font-bold text-white/70">/month</span></div>}
-            <div className="text-sm text-white/70">Flat fee, still 0% commission · local pricing in every market</div>
+            <div className="text-sm text-white/70">Flat fee in USD, 0% commission on your sales</div>
             <ul className="mt-6 space-y-2.5">{PRO.map(([f, live]) => (
               <li key={f} className="flex gap-2"><Check className={`mt-0.5 size-5 shrink-0 ${live ? 'text-sun' : 'text-white/35'}`} />
                 <span>{f}{!live && <span className="ml-1.5 rounded-full bg-white/15 px-1.5 py-0.5 text-[11px] font-bold">SOON</span>}</span></li>
             ))}</ul>
             <ProCta acct={acct} />
             {!(acct?.pro || acct?.role === 'cohost') && <>
-            <p className="mt-5 text-sm font-semibold text-white/80">Get told when auto-confirming your buyers' payments (through payment gateways) launches:</p>
+            <p className="mt-5 text-sm font-semibold text-white/80">Get told when automatic payment confirmation for your buyers launches:</p>
             {done ? (
               <div className="mt-2 rounded-2xl bg-white/10 p-4 text-center font-semibold">You're on the list 🎉 We'll tell you when it launches.</div>
             ) : (
@@ -109,7 +110,7 @@ function ProCta({ acct }: { acct: SellerAccount | null }) {
     return (
       <div className="mt-7">
         <p className="text-center text-sm text-white/85">Your free trial has ended. Your shop is on Free, and nothing was lost.</p>
-        <Link to="/sell?pro=pay" className="btn mt-2 w-full bg-sun py-3.5 text-ink">Get Pro · ${acct.founding ? '4.50' : '9'}/month →</Link>
+        <Link to="/sell?pro=pay" className="btn mt-2 w-full bg-sun py-3.5 text-ink">Get Pro · {money(acct.proPrice ?? 9, 'USD')}/month →</Link>
       </div>
     );
   }
@@ -118,6 +119,6 @@ function ProCta({ acct }: { acct: SellerAccount | null }) {
       setBusy(true);
       try { await api.proTrial(); celebrate({ x: 0.75, y: 0.6 }); toasts.push(`Pro trial started: ${acct.referred ? 30 : 14} days free`, 'mint'); nav('/sell'); }
       catch (e) { toasts.push(e instanceof Error ? e.message : 'Could not start the trial', 'hot'); } finally { setBusy(false); }
-    }}>{busy ? <Spinner /> : `Start ${acct.referred ? 30 : 14}-day free trial — no card${acct.founding ? ', then $4.50/mo' : ''}`}</button>
+    }}>{busy ? <Spinner /> : `Start ${acct.referred ? 30 : 14}-day free trial — no card, then ${money(acct.proPrice ?? 9, 'USD')}/mo`}</button>
   );
 }

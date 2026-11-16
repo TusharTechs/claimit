@@ -226,6 +226,15 @@ app.get('/api/seller/pro/billing', h((req) => {
     price: proPriceFor(s), pending, proUntil: s.pro_until };
 }));
 
+interface DodoPaymentData { payment_id?: string; total_amount?: number; currency?: string; settlement_amount?: number; settlement_currency?: string; metadata?: Record<string, string> }
+/** Pro is priced in USD; the buyer may have paid in any currency (Dodo localises checkout), so normalise to USD. */
+function toUsd(d: DodoPaymentData) {
+  const cur = (d.currency || 'USD').toUpperCase();
+  if (cur === 'USD') return (d.total_amount ?? 0) / 100;
+  if ((d.settlement_currency || '').toUpperCase() === 'USD' && typeof d.settlement_amount === 'number') return d.settlement_amount / 100;
+  return ((d.total_amount ?? 0) / 100) * (USD_RATE[cur] ?? 0);
+}
+
 /** Dodo webhook (Standard Webhooks signing): verify, then add 30 days of Pro for the shop in the payment's metadata. */
 app.post('/api/dodo/webhook', (req, res) => {
   const secret = dodo().secret;
@@ -242,14 +251,14 @@ app.post('/api/dodo/webhook', (req, res) => {
   });
   if (!ok) return res.status(401).json({ ok: false, error: 'bad_signature' });
 
-  const ev = req.body as { type?: string; data?: { payment_id?: string; total_amount?: number; settlement_amount?: number; currency?: string; metadata?: Record<string, string> } };
+  const ev = req.body as { type?: string; data?: DodoPaymentData & { amount?: number } };
   const sellerId = ev.data?.metadata?.sellerId;
   const shop = sellerId ? (db.prepare(`SELECT ${SELLER_COLS} FROM sellers WHERE id = ?`).get(sellerId) as SellerAuth | undefined) : undefined;
   if (ev.type === 'payment.succeeded' && shop && ev.data?.metadata?.kind === 'claimit_pro') {
     const payId = String(ev.data.payment_id || id);
     // The checkout link is public, so the amount decides the time: the shop's own price buys 30 days, less buys
     // proportionally less (e.g. a standard shop that pays the founding price gets 15 days).
-    const paidUsd = (ev.data.total_amount ?? 0) / 100;
+    const paidUsd = toUsd(ev.data);
     const days = Math.max(0, Math.min(30, Math.floor((30 * paidUsd) / proPriceFor(shop) + 1e-9)));
     tx(() => {
       // Idempotent: Dodo may deliver the same event more than once.
@@ -260,13 +269,31 @@ app.post('/api/dodo/webhook', (req, res) => {
       db.prepare('UPDATE sellers SET pro_until = ? WHERE id = ?').run(Math.max(now(), cur) + days * 86_400_000, shop.id);
     });
   }
-  // A refund or a chargeback takes back the Pro time that payment bought.
+  // A refund or a chargeback takes back the Pro time that payment bought (a partial refund, a proportional share).
   if (ev.type === 'refund.succeeded' || ev.type === 'dispute.opened') {
     const payId = String(ev.data?.payment_id || '');
-    const p = db.prepare(`SELECT seller_id, days FROM pro_payments WHERE id = ? AND status = 'confirmed'`).get(payId) as { seller_id: string; days: number } | undefined;
-    if (p) tx(() => {
-      db.prepare(`UPDATE pro_payments SET status = ?, decided = ? WHERE id = ?`).run(ev.type === 'refund.succeeded' ? 'refunded' : 'disputed', now(), payId);
-      db.prepare('UPDATE sellers SET pro_until = MAX(?, COALESCE(pro_until, 0) - ?) WHERE id = ?').run(now() - 1, p.days * 86_400_000, p.seller_id);
+    const p = db.prepare(`SELECT seller_id, days, amount FROM pro_payments WHERE id = ? AND status = 'confirmed'`).get(payId) as { seller_id: string; days: number; amount: number } | undefined;
+    if (p) {
+      const refundUsd = ev.type === 'refund.succeeded' && typeof ev.data?.amount === 'number' ? toUsd({ ...ev.data, total_amount: ev.data.amount }) : p.amount;
+      const back = p.amount > 0 ? Math.min(p.days, Math.ceil((p.days * refundUsd) / p.amount - 1e-9)) : p.days;
+      tx(() => {
+        db.prepare(`UPDATE pro_payments SET status = ?, decided = ?, days = ? WHERE id = ?`)
+          .run(ev.type === 'refund.succeeded' ? (back < p.days ? 'partially_refunded' : 'refunded') : 'disputed', now(), p.days - back, payId);
+        db.prepare('UPDATE sellers SET pro_until = MAX(?, COALESCE(pro_until, 0) - ?) WHERE id = ?').run(now() - 1, back * 86_400_000, p.seller_id);
+        db.prepare('INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)').run(`clawback:${payId}`, String(back));
+      });
+    }
+  }
+  // A dispute the shop wins (or that is withdrawn) gives the time back.
+  if (ev.type === 'dispute.won' || ev.type === 'dispute.cancelled') {
+    const payId = String(ev.data?.payment_id || '');
+    const p = db.prepare(`SELECT seller_id FROM pro_payments WHERE id = ? AND status = 'disputed'`).get(payId) as { seller_id: string } | undefined;
+    const back = Number((db.prepare('SELECT v FROM kv WHERE k = ?').get(`clawback:${payId}`) as { v: string } | undefined)?.v ?? 0);
+    if (p && back) tx(() => {
+      db.prepare(`UPDATE pro_payments SET status = 'confirmed', decided = ?, days = days + ? WHERE id = ?`).run(now(), back, payId);
+      const cur = (db.prepare('SELECT pro_until FROM sellers WHERE id = ?').get(p.seller_id) as { pro_until: number | null }).pro_until ?? 0;
+      db.prepare('UPDATE sellers SET pro_until = ? WHERE id = ?').run(Math.max(now(), cur) + back * 86_400_000, p.seller_id);
+      db.prepare('DELETE FROM kv WHERE k = ?').run(`clawback:${payId}`);
     });
   }
   res.json({ ok: true });
@@ -833,7 +860,8 @@ app.post('/api/claims/:claimId/release', h((req) => {
 // events: user:connection_status, open_channel:pre_messaging, direct_channel:pre_messaging.
 
 const seenWebhookTypes = new Set<string>();
-const seenNonces = new Map<string, number>(); // nonce -> expiry
+db.exec('CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
+db.exec('CREATE TABLE IF NOT EXISTS webhook_nonces (n TEXT PRIMARY KEY, exp INTEGER NOT NULL)'); // persisted: survives restarts
 const shopKnowsBuyer = (sellerId: string, buyerId: string) => !!db.prepare(`SELECT 1 FROM claims c JOIN drops d ON d.id = c.drop_id
   WHERE d.seller_id = ? AND c.buyer_id = ? UNION SELECT 1 FROM follows WHERE seller_id = ? AND buyer_id = ? LIMIT 1`).get(sellerId, buyerId, sellerId, buyerId);
 const MAX_ITEMS_PER_DROP = 90;
@@ -901,9 +929,9 @@ app.post('/api/nexconn/webhook', express.json({ limit: '1mb' }), (req, res) => {
   if (Math.abs(Date.now() - Number(ts)) > 5 * 60_000) return res.status(401).json({ error: 'stale' }); // replay protection
   // Nexconn signs nonce+timestamp, not the body: remember nonces for the 5-minute window so captured headers can't be
   // replayed with a forged body (e.g. fake presence events that would get a buyer skipped in line).
-  for (const [n, exp] of seenNonces) if (exp < Date.now()) seenNonces.delete(n);
-  if (seenNonces.has(nonce)) return res.status(401).json({ error: 'replayed' });
-  seenNonces.set(nonce, Date.now() + 5 * 60_000);
+  db.prepare('DELETE FROM webhook_nonces WHERE exp < ?').run(Date.now());
+  if (db.prepare('SELECT 1 FROM webhook_nonces WHERE n = ?').get(nonce)) return res.status(401).json({ error: 'replayed' });
+  db.prepare('INSERT INTO webhook_nonces (n, exp) VALUES (?, ?)').run(nonce, Date.now() + 5 * 60_000);
   const type = String(req.body?.type || '');
   if (!seenWebhookTypes.has(type)) { seenWebhookTypes.add(type); console.log('[webhook] first', type, JSON.stringify(req.body).slice(0, 400)); }
   const data: any[] = Array.isArray(req.body?.data) ? req.body.data : [];
@@ -960,6 +988,29 @@ app.post('/api/admin/reports/resolve', h((req) => {
   const status = req.body.status === 'dismissed' ? 'dismissed' : 'upheld';
   db.prepare('UPDATE shop_reports SET status = ? WHERE seller_id = ? AND buyer_id = ?').run(status, str(req.body.sellerId, 20, 'shop'), str(req.body.buyerId, 20, 'buyer'));
   return { ok: true };
+}));
+
+app.get('/api/admin/revenue', h((req) => {
+  admin(req);
+  const shops = db.prepare(`SELECT s.id, s.founding, s.created, s.pro_until, s.trial_used,
+      (SELECT COUNT(*) FROM pro_payments p WHERE p.seller_id = s.id AND p.status IN ('confirmed','partially_refunded')) AS paid
+    FROM sellers s WHERE s.id != 'demoshop'`).all() as { id: string; founding: number; created: number; pro_until: number | null; trial_used: number; paid: number }[];
+  const t = now();
+  const paying = shops.filter((s) => s.paid > 0 && (s.pro_until ?? 0) > t);
+  const everPaid = shops.filter((s) => s.paid > 0);
+  const trialled = shops.filter((s) => s.trial_used);
+  const money = (sql: string) => Number(Object.values(db.prepare(sql).get() as object)[0] ?? 0);
+  return {
+    shops: shops.length,
+    payingShops: paying.length,
+    mrrUsd: Math.round(paying.reduce((a, s) => a + proPriceFor(s), 0) * 100) / 100, // what paying shops pay per month at their current price
+    onTrial: shops.filter((s) => s.trial_used && !s.paid && (s.pro_until ?? 0) > t).length,
+    trialToPaidPct: trialled.length ? Math.round((trialled.filter((s) => s.paid > 0).length / trialled.length) * 100) : null,
+    renewingShops: everPaid.filter((s) => s.paid > 1).length, // paid more than once
+    churnedShops: everPaid.filter((s) => (s.pro_until ?? 0) <= t).length, // paid before, Pro has lapsed
+    revenueUsd: money(`SELECT COALESCE(SUM(amount),0) FROM pro_payments WHERE status IN ('confirmed','partially_refunded')`),
+    refundRatePct: (() => { const all = money(`SELECT COUNT(*) FROM pro_payments`); const bad = money(`SELECT COUNT(*) FROM pro_payments WHERE status IN ('refunded','partially_refunded','disputed')`); return all ? Math.round((bad / all) * 100) : 0; })(),
+  };
 }));
 
 app.get('/api/admin/stats', h((req) => {

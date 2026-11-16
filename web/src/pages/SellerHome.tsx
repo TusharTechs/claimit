@@ -193,7 +193,7 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
 
       {/* Returning sellers reach their drops first; value, team and invites follow. */}
       <ValueCard />
-      <ProTeam shop={seller.shop} onAccount={(a) => setIsPro(a.pro)} />
+      <ProTeam shop={seller.shop} onAccount={(a) => { setIsPro(a.pro); if (!a.pro) setStartsAt(''); }} />
       <InviteCard sellerId={seller.id} shop={seller.shop} />
     </div>
   );
@@ -224,12 +224,20 @@ function ProTeam({ shop, onAccount }: { shop: string; onAccount?: (a: SellerAcco
       return;
     }
     toast('Payment received — switching on Pro…');
-    const before = Date.now();
+    let saved: { until: number; paidBefore: boolean } = { until: 0, paidBefore: false };
+    try { saved = { ...saved, ...JSON.parse(localStorage.getItem('claimit.checkout') || '{}') }; } catch { /* ignore */ }
     let n = 0;
     const t = setInterval(async () => {
       try {
         const a = await api.sellerSession();
-        if (a.pro && a.paidPro) { clearInterval(t); toast.success(a.proUntil && a.proUntil - before > 31 * 86_400_000 ? 'Renewed: 30 more days of Pro added.' : 'Pro is on for 30 days.'); load(); }
+        // Done only when this payment's days have been added (the until date moved past where it stood at checkout).
+        if (a.pro && a.paidPro && (a.proUntil ?? 0) > saved.until + 86_400_000) {
+          clearInterval(t);
+          try { localStorage.removeItem('claimit.checkout'); } catch { /* ignore */ }
+          const until = new Date(a.proUntil!).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+          toast.success(saved.paidBefore ? `Renewed: Pro now runs until ${until}.` : saved.until > Date.now() ? `Paid: 30 days added after your trial. Pro runs until ${until}.` : `Pro is on until ${until}.`);
+          load();
+        }
       } catch { /* retry */ }
       if (++n > 20) { clearInterval(t); toast("Still confirming your payment. Pro will switch on as soon as it does."); }
     }, 2000);
@@ -250,7 +258,7 @@ function ProTeam({ shop, onAccount }: { shop: string; onAccount?: (a: SellerAcco
   if (acct.role === 'cohost') {
     return <div className="mt-6 rounded-2xl bg-sun-soft px-4 py-3 text-sm font-semibold">You're a co-host for {shop}{acct.cohostName ? ` (as ${acct.cohostName})` : ''}: you can run drops and confirm payments.</div>;
   }
-  const paySheet = <ProPaySheet open={payOpen} onClose={() => { setPayOpen(false); load(); }} />;
+  const paySheet = <ProPaySheet open={payOpen} onClose={() => { setPayOpen(false); load(); }} paidBefore={acct.paidPro} />;
   const daysLeft = acct.proUntil ? Math.ceil((acct.proUntil - Date.now()) / 86_400_000) : 0;
   if (!acct.pro) {
     return (
@@ -258,17 +266,17 @@ function ProTeam({ shop, onAccount }: { shop: string; onAccount?: (a: SellerAcco
         <Crown className="size-8 shrink-0 text-sun" />
         <div className="min-w-[14rem] flex-1">
           <div className="font-display text-xl font-bold">Go live with a co-host</div>
-          <p className="text-sm text-white/75">Pro lets a helper confirm payments and drop items from their own phone while you present. ${acct.proPrice ?? 9}/month, 0% commission. The trial needs no card: after {trialDays} days you're simply back on Free.</p>
+          <p className="text-sm text-white/75">Pro lets a helper confirm payments and drop items from their own phone while you present. {money(acct.proPrice ?? 9, 'USD')}/month, 0% commission. The trial needs no card: after {trialDays} days you're simply back on Free.</p>
           {acct.founding && <span className="mt-2 inline-block rounded-full bg-sun px-2.5 py-1 text-xs font-bold text-ink">Founding seller · 50% off Pro year one</span>}
         </div>
         {acct.trialUsed
           ? <div className="w-full text-sm text-white sm:w-auto sm:max-w-xs"><b className="text-white">Your trial has ended.</b> You're on Free and nothing was lost. Co-hosts are paused until Pro.
-              <button className="btn mt-2 w-full bg-sun px-5 py-2.5 text-ink" onClick={() => setPayOpen(true)}>Get Pro · ${acct.founding ? '4.50' : '9'}/month</button></div>
+              <button className="btn mt-2 w-full bg-sun px-5 py-2.5 text-ink" onClick={() => setPayOpen(true)}>Get Pro · {money(acct.proPrice ?? 9, 'USD')}/month</button></div>
           : <button className="btn w-full shrink-0 self-center bg-sun px-5 py-2.5 text-ink sm:w-auto" disabled={busy} onClick={async () => {
               setBusy(true);
               try { await api.proTrial(); toast.success(`Pro trial started: ${trialDays} days free`); await load(); } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not start the trial'); } finally { setBusy(false); }
             }}>{busy ? <Spinner /> : `Start ${trialDays}-day free trial`}</button>}
-        {!acct.trialUsed && <button className="w-full text-center text-sm font-semibold text-white underline sm:w-auto sm:self-center" onClick={() => setPayOpen(true)}>or pay now · ${acct.founding ? '4.50' : '9'}/mo</button>}
+        {!acct.trialUsed && <button className="w-full text-center text-sm font-semibold text-white underline sm:w-auto sm:self-center" onClick={() => setPayOpen(true)}>or pay now · {money(acct.proPrice ?? 9, 'USD')}/mo</button>}
       </section></>
     );
   }
@@ -382,7 +390,7 @@ function InviteCard({ sellerId, shop }: { sellerId: string; shop: string }) {
 }
 
 /** Pay for Pro: ClaimIt's own payment link/account plus a reference; the operator confirms and 30 days are added. */
-function ProPaySheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+function ProPaySheet({ open, onClose, paidBefore }: { open: boolean; onClose: () => void; paidBefore?: boolean }) {
   const [b, setB] = useState<Awaited<ReturnType<typeof api.proBilling>> | null>(null);
   const [ref, setRef] = useState('');
   const [busy, setBusy] = useState(false);
@@ -404,7 +412,10 @@ function ProPaySheet({ open, onClose }: { open: boolean; onClose: () => void }) 
               <b>Test mode: no real money moves.</b> Pay with card <span className="font-mono">4242 4242 4242 4242</span>, expiry 06/32, CVV 123 (India: <span className="font-mono">4576 2389 1277 1450</span>, or UPI <span className="font-mono">success@upi</span>).
             </div>
           )}
-          <a className="btn w-full bg-mint py-3 text-white" href={b.checkout}>Pay {money(b.price, 'USD')} securely ↗</a>
+          <a className="btn w-full bg-mint py-3 text-white" href={b.checkout} onClick={() => {
+            // Remember where Pro stood, so the return page can tell when this payment's days have landed.
+            try { localStorage.setItem('claimit.checkout', JSON.stringify({ until: b.proUntil ?? 0, paidBefore: !!paidBefore, at: Date.now() })); } catch { /* ignore */ }
+          }}>Pay {money(b.price, 'USD')} securely ↗</a>
           <p className="text-center text-xs text-muted">Checkout by Dodo Payments. ClaimIt never sees your card.</p>
         </div>
       ) : b.pending ? (

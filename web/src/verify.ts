@@ -47,6 +47,6 @@ export async function verifyOrderStatus(claimId: string, status: string | undefi
   if (!(await statusCache.get(ck))) { statusCache.delete(ck); return false; } // don't pin a failure (e.g. key not loaded yet)
   const time = Number(t ?? 0);
   if (time < (newest.get(claimId) ?? 0)) return false;
-  if (time > (newest.get(claimId) ?? 0)) { newest.set(claimId, time); saveNewest(); }
+  if (time > (newest.get(claimId) ?? 0)) { newest.delete(claimId); newest.set(claimId, time); saveNewest(); } // most recent last
   return true;
 }

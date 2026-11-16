@@ -117,7 +117,7 @@ async function nexconnTransport(cfg: AppConfig): Promise<Transport> {
     async exitOpen(channelId) { await new OpenChannel(channelId).exitChannel(); },
     async sendOpen(channelId, type, content) {
       const res = await new OpenChannel(channelId).sendMessage(new SendMessageParams(content as Record<string, any>, type));
-      if (!res.isOk) throw new Error('NOT_SENT'); // refused by moderation (pre-message webhook or a native mute)
+      if (!res.isOk) throw new Error(navigator.onLine ? 'NOT_SENT' : 'OFFLINE'); // refused by moderation (pre-message webhook or a native mute) vs. offline
       return res.data ? toRt(res.data) : null;
     },
     async sendDirect(peerId, type, content) {
@@ -125,7 +125,8 @@ async function nexconnTransport(cfg: AppConfig): Promise<Transport> {
       const res = type === MSG.TEXT
         ? await ch.sendMessage(new SendTextMessageParams({ text: (content as { text: string }).text }))
         : await ch.sendMessage(new SendMessageParams(content as Record<string, any>, type) as any);
-      return res.isOk && res.data ? toRt(res.data) : null;
+      if (!res.isOk) throw new Error(navigator.onLine ? 'NOT_SENT' : 'OFFLINE'); // moderation refusal vs. no connection
+      return res.data ? toRt(res.data) : null;
     },
     async history(peerId) {
       const query = BaseChannel.createMessagesQuery({
@@ -179,7 +180,8 @@ function mockTransport(): Transport {
       return null; // mock echoes to sender through the stream
     },
     async sendDirect(peerId, type, content) {
-      await post('/api/mock/send-direct', { to: peerId, type, content });
+      const r = await post('/api/mock/send-direct', { to: peerId, type, content }) as { blocked?: boolean };
+      if (r?.blocked) throw new Error('NOT_SENT');
       return null;
     },
     async history(peerId) {

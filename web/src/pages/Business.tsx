@@ -164,7 +164,7 @@ export default function Business() {
             <h2 className="font-display text-2xl font-extrabold">Unit economics of a Pro seller</h2>
             <p className="mt-1 text-sm text-white/70">Illustrative. The inputs are assumptions until pilot shops report real numbers.</p>
             <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {[['$9', 'revenue per month'], ['4', 'drops a month (assumed)'], ['~150', 'unique buyers = MAU (assumed)'], ['$0', 'payment cost: buyers pay the seller directly']].map(([v, k]) => (
+              {[['$9', 'revenue per month'], ['4', 'drops a month (assumed)'], ['~150', 'unique buyers = MAU (assumed)'], ['$0', 'cost on sellers\' sales: buyers pay the seller directly']].map(([v, k]) => (
                 <div key={k} className="rounded-2xl bg-white/10 p-3"><dt className="font-display text-2xl font-extrabold">{v}</dt><dd className="text-xs text-white/75">{k}</dd></div>
               ))}
             </dl>
