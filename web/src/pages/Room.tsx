@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { Check, ChevronRight, Lock, MessageCircle, Share2, ShoppingBag, Truck, WifiOff } from 'lucide-react';
+import { Check, ChevronRight, Lock, MessageCircle, Share2, ShieldCheck, ShoppingBag, Truck, WifiOff } from 'lucide-react';
 import { api, ApiError, sessions, type BuyerSession, type Shipping } from '../api';
 import { rt, type RtMessage } from '../rt';
 import { Avatar, ConfirmSheet, CopyButton, ItemThumb, Logo, LogoMark, QR, Sheet, Spinner, celebrate, useToasts } from '../components/ui';
 import { DMThread } from '../components/DMThread';
 import { ensureBuyer, shopIdOf } from '../buyer';
-import { embedUrl, mmss, money, payLinkFor, rupees, setCurrency, upiLink, useCountdown, useDebounced } from '../util';
+import { approx, embedUrl, mmss, money, payLinkFor, setCurrency, upiLink, useCountdown, useDebounced } from '../util';
 import {
   MSG, itemKey,
   type ChatContent, type DropCardContent, type DropState, type EventContent, type Item, type ItemState, type MyClaim, type PublicDrop,
@@ -42,7 +42,14 @@ export default function Room() {
   const [feed, setFeed] = useState<FeedEntry[]>([]);
   const [people, setPeople] = useState<People>({});
   const [claims, setClaims] = useState<MyClaim[]>([]);
-  const [ordersOpen, setOrdersOpen] = useState(false);
+  // /d/:id?order=<claimId> (from My orders) opens straight to that order.
+  const deepOrder = useMemo(() => new URLSearchParams(location.search).get('order'), []);
+  const [ordersOpen, setOrdersOpen] = useState(!!deepOrder);
+  useEffect(() => {
+    if (!deepOrder || !ordersOpen) return;
+    const t = setTimeout(() => document.getElementById(`order-${deepOrder}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 600);
+    return () => clearTimeout(t);
+  }, [deepOrder, ordersOpen]);
   const [selected, setSelected] = useState<string | null>(null);
   const [nameFor, setNameFor] = useState<string | null>(null); // item waiting for the buyer's name before claiming
   const [yourTurn, setYourTurn] = useState<string | null>(null);
@@ -111,7 +118,18 @@ export default function Room() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me?.id, drop?.channelId]);
 
-  useEffect(() => rt.onStatus(setOnline), []);
+  // Back online after a drop-out (tunnel, app switch): resync everything we may have missed instead of waiting for a poll.
+  const wasOnline = useRef(true);
+  useEffect(() => rt.onStatus((on) => {
+    setOnline(on);
+    if (on && !wasOnline.current) {
+      loadDrop();
+      loadClaims();
+      if (drop?.channelId) rt.enterOpen(drop.channelId).then(({ metadata }) => applyMeta(metadata)).catch(() => {});
+    }
+    wasOnline.current = on;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [drop?.channelId]);
 
   const applyMeta = (entries: Record<string, string | null>) => {
     let mineChanged = false;
@@ -123,7 +141,8 @@ export default function Room() {
         try {
           const s = JSON.parse(v) as ItemState;
           if (!next[s.id] || next[s.id].v <= s.v) {
-            if (involves(next[s.id], myId) !== involves(s, myId) || (s.holder?.id === myId) !== (next[s.id]?.holder?.id === myId)) mineChanged = true;
+            if (involves(next[s.id], myId) !== involves(s, myId) || (s.holder?.id === myId) !== (next[s.id]?.holder?.id === myId)
+              || (s.holder?.id === myId && s.holdUntil !== next[s.id]?.holdUntil)) mineChanged = true;
             next[s.id] = s;
           }
         } catch { /* ignore */ }
@@ -253,11 +272,19 @@ export default function Room() {
         <div className="min-w-0 flex-1">
           <Link to={`/s/${shopIdOf(drop.sellerId)}`} className="line-clamp-1 font-display text-lg font-extrabold leading-tight hover:underline" title={`${drop.shop} — see shop`}>{drop.shop}</Link>
           <div className="line-clamp-1 text-xs text-muted" title={drop.title}>{drop.title}</div>
+          {drop.trust && !drop.demo && (
+            <div className="mt-0.5 flex items-center gap-1 text-[11px] font-semibold text-ink-2">
+              <ShieldCheck className="size-3.5 text-mint" />
+              {drop.trust.orders > 0
+                ? <>{drop.trust.orders} order{drop.trust.orders === 1 ? '' : 's'} confirmed{drop.trust.avgConfirmSec ? ` · confirms in ${approx(drop.trust.avgConfirmSec)}` : ''}</>
+                : <>New shop · since {new Date(drop.trust.since).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</>}
+            </div>
+          )}
         </div>
         {ended ? (
           <span className="rounded-full bg-line px-2.5 py-1 text-xs font-bold text-ink-2">ENDED</span>
         ) : (
-          <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-2.5 py-1 text-xs font-bold text-white" aria-live="polite">
+          <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-2.5 py-1 text-xs font-bold text-white">
             <span className={`size-1.5 rounded-full ${connected && online ? 'anim-live bg-hot' : 'bg-white/40'}`} />
             LIVE{viewers && viewers >= 3 ? ` · ${viewers} watching` : ''}
           </span>
@@ -267,7 +294,7 @@ export default function Room() {
         </button>
         <button onClick={() => setOrdersOpen(true)} className="relative grid size-10 shrink-0 place-items-center rounded-full bg-white shadow-sm" aria-label={`My orders${activeClaims.length ? `, ${activeClaims.length} active` : ''}`}>
           <ShoppingBag className="size-[18px]" />
-          {activeClaims.length > 0 && <span className="absolute -right-0.5 -top-0.5 grid size-5 place-items-center rounded-full bg-hot text-[11px] font-bold text-white">{activeClaims.length}</span>}
+          {activeClaims.length > 0 && <span className="absolute -right-0.5 -top-0.5 grid size-5 place-items-center rounded-full bg-hot-dark text-[11px] font-bold text-white">{activeClaims.length}</span>}
         </button>
       </header>
 
@@ -324,11 +351,11 @@ export default function Room() {
                     <div className="aspect-square bg-line"><ItemThumb name={it.name} image={it.image} /></div>
                     <div className="px-2 py-1.5">
                       <div className="line-clamp-2 text-[12px] font-semibold leading-tight">{it.name}</div>
-                      <div className="text-[11px] text-muted">{rupees(it.price)}</div>
+                      <div className="text-[11px] text-muted">{money(it.price)}</div>
                     </div>
                     {st?.status === 'sold' && <div className="absolute inset-0 grid place-items-center bg-white/55 font-display text-lg font-extrabold text-mint">SOLD</div>}
                     {(st?.status === 'held' || st?.status === 'paying') && <div className="absolute left-1.5 top-1.5 rounded-full bg-sun px-1.5 text-[10px] font-bold">HELD</div>}
-                    {st?.status === 'live' && <div className="absolute left-1.5 top-1.5 rounded-full bg-hot px-1.5 text-[10px] font-bold text-white">OPEN</div>}
+                    {st?.status === 'live' && <div className="absolute left-1.5 top-1.5 rounded-full bg-hot-dark px-1.5 text-[10px] font-bold text-white">OPEN</div>}
                   </button>
                 );
               })}
@@ -341,10 +368,14 @@ export default function Room() {
 
       {/* Pinned action area: claim bar + chat. Always in thumb reach, never pushed below the fold. */}
       <div className="border-t border-line bg-paper/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2.5 backdrop-blur">
-        {current && !ended && (
-          <ClaimBar item={current} st={curState} myClaim={myClaim} me={me} disabled={!connected}
+        {current && !ended && (<>
+          <span className="sr-only" aria-live="assertive">{
+            myClaim?.status === 'holding' ? `It's yours: ${current.name}. Pay to keep it.`
+            : myClaim?.status === 'waiting' ? `You're number ${myClaim.position} in line for ${current.name}.`
+            : myClaim?.status === 'paid' ? `Payment confirmed. ${current.name} is yours.` : ''}</span>
+          <ClaimBar item={current} st={curState} myClaim={myClaim} me={me} disabled={!connected} nextAt={dropState?.nextAt} shop={drop.shop}
             onClaim={() => doClaim(current)} onPay={() => setOrdersOpen(true)} />
-        )}
+        </>)}
         <ChatInput disabled={!connected || ended || !me} ended={ended} onSend={async (text) => {
           if (!me) return;
           const sent = await rt.sendOpen(drop.channelId, MSG.CHAT, { text, name: me.name });
@@ -450,13 +481,13 @@ function ItemHero({ item, st, me, compact, isLatest, holdSeconds }: {
       <div className="p-4">
         <div className="flex items-start justify-between gap-3">
           <h1 className="font-display text-2xl font-bold leading-tight">{item.name}</h1>
-          <div className="font-display text-2xl font-extrabold">{rupees(item.price)}</div>
+          <div className="font-display text-2xl font-extrabold">{money(item.price)}</div>
         </div>
 
         <AnimatePresence initial={false}>
           {(holder || waitlist.length > 0) && status !== 'sold' && (
             <motion.div layout initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-              className="mt-3 overflow-hidden rounded-2xl bg-sun-soft p-3 text-sm" aria-live="polite">
+              className="mt-3 overflow-hidden rounded-2xl bg-sun-soft p-3 text-sm">
               <AnimatePresence mode="popLayout" initial={false}>
                 {holder && (
                   <motion.div key={holder.id} layout initial={{ x: 40, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: -40, opacity: 0 }}
@@ -494,9 +525,11 @@ function ItemHero({ item, st, me, compact, isLatest, holdSeconds }: {
   );
 }
 
-function ClaimBar({ item, st, myClaim, me, disabled, onClaim, onPay }: {
+function ClaimBar({ item, st, myClaim, me, disabled, onClaim, onPay, nextAt, shop }: {
   item: Item; st?: ItemState; myClaim?: MyClaim; me: BuyerSession | null; disabled: boolean; onClaim: () => Promise<void>; onPay: () => void;
+  nextAt?: number | null; shop: string;
 }) {
+  const nextIn = useCountdown(nextAt && nextAt > Date.now() ? nextAt : null);
   const [busy, setBusy] = useState(false);
   const status = st?.status ?? item.status;
   const left = useCountdown(myClaim?.status === 'holding' ? myClaim.holdUntil : null);
@@ -511,12 +544,17 @@ function ClaimBar({ item, st, myClaim, me, disabled, onClaim, onPay }: {
   let label: React.ReactNode = '';
   let action: (() => void) | undefined;
   let ring = false;
-  if (status === 'sold') { tone = myClaim?.status === 'paid' ? 'mint' : 'muted'; label = myClaim?.status === 'paid' ? 'Yours! 🎉' : `Sold to ${st?.holder?.name ?? 'someone'}`; }
-  else if (status === 'closed') label = 'No longer available';
+  // Between items: say what happens next (a countdown in the demo, "stay here" in real drops) instead of a dead grey bar.
+  const upNext = nextIn > 0 ? <>Next item in <span className="tabular-nums">{Math.ceil(nextIn / 1000)}s</span> — get ready</> : <>Next one from {shop} soon — stay here 🔔</>;
+  if (status === 'sold') {
+    tone = myClaim?.status === 'paid' ? 'mint' : 'muted';
+    label = myClaim?.status === 'paid' ? 'Yours! 🎉' : <span className="flex flex-col items-center leading-tight"><span className="text-sm font-semibold opacity-70">Sold to {st?.holder?.name ?? 'someone'}</span><span className="text-lg">{upNext}</span></span>;
+  }
+  else if (status === 'closed') label = <span className="flex flex-col items-center leading-tight"><span className="text-sm font-semibold opacity-70">No longer available</span><span className="text-lg">{upNext}</span></span>;
   else if (myClaim?.status === 'holding') { tone = 'mint'; label = <>IT'S YOURS ✓ · Pay now <span className="tabular-nums">{mmss(left)}</span></>; action = onPay; }
   else if (myClaim?.status === 'paying') { tone = 'mint'; label = 'Paid · seller confirming'; action = onPay; }
   else if (myClaim?.status === 'waiting') { tone = 'sun'; label = `You're #${myPos} in line`; }
-  else if (status === 'live') { tone = 'hot'; label = `CLAIM · ${rupees(item.price)}`; action = run; ring = true; }
+  else if (status === 'live') { tone = 'hot'; label = `CLAIM · ${money(item.price)}`; action = run; ring = true; }
   else if (waitCount >= 5) label = 'Waitlist full';
   else { tone = 'ink'; label = `Join the line (#${waitCount + 1})`; action = run; }
 
@@ -543,7 +581,7 @@ function Feed({ feed, people, meId, sellerId }: { feed: FeedEntry[]; people: Peo
     if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 140) el.scrollIntoView({ block: 'end', behavior: 'smooth' });
   }, [lastId]);
   return (
-    <div className="space-y-1.5 px-4 pb-3 pt-4" aria-live="polite" aria-label="Live room activity">
+    <div className="space-y-1.5 px-4 pb-3 pt-4" role="log" aria-live="off" aria-label="Live room activity">
       {feed.length === 0 && <div className="py-4 text-center text-sm text-muted">Claims and chat show up here live. Ask about size or colour 👇</div>}
       {feed.map((f) => {
         if (f.kind === 'event') {
@@ -551,7 +589,7 @@ function Feed({ feed, people, meId, sellerId }: { feed: FeedEntry[]; people: Peo
           return <div key={f.id} className={`anim-rise mx-auto w-fit max-w-full rounded-full px-3 py-1 text-center text-[13px] font-semibold ${tone}`}>{f.ev.text}</div>;
         }
         if (f.kind === 'drop') {
-          return <div key={f.id} className="anim-rise mx-auto w-fit rounded-full bg-ink px-3 py-1 text-[13px] font-semibold text-white">🔥 Dropped #{f.card.idx}: {f.card.name} · {rupees(f.card.price)}</div>;
+          return <div key={f.id} className="anim-rise mx-auto w-fit rounded-full bg-ink px-3 py-1 text-[13px] font-semibold text-white">🔥 Dropped #{f.card.idx}: {f.card.name} · {money(f.card.price)}</div>;
         }
         const isSeller = f.sender === sellerId;
         const name = f.sender === meId ? 'You' : people[f.sender]?.name ?? '…';
@@ -686,7 +724,7 @@ function Orders({ claims, sellerId, shop, buyerName, onChange, toast }: {
   return (
     <div className="space-y-3">
       {visible.length === 0 && <p className="py-4 text-center text-muted">Nothing yet. Tap Claim on an item to grab it.</p>}
-      {visible.map((c) => <OrderCard key={c.id} c={c} buyerName={buyerName} onChange={onChange} toast={toast} />)}
+      {visible.map((c) => <div key={c.id} id={`order-${c.id}`}><OrderCard c={c} buyerName={buyerName} onChange={onChange} toast={toast} /></div>)}
       <div className="rounded-2xl border border-line bg-card">
         <button className="flex w-full items-center gap-3 px-3 py-3 text-left" onClick={() => setChatOpen((o) => !o)} aria-expanded={chatOpen}>
           <span className="grid size-9 place-items-center rounded-full bg-paper"><MessageCircle className="size-[18px]" /></span>
@@ -773,7 +811,7 @@ function OrderCard({ c, buyerName, onChange, toast }: { c: MyClaim; buyerName: s
         <div className="size-14 shrink-0 overflow-hidden rounded-xl bg-line"><ItemThumb name={c.itemName} image={c.image} /></div>
         <div className="min-w-0 flex-1">
           <div className="truncate font-semibold">{c.itemName}</div>
-          <div className="text-sm text-ink-2">{rupees(c.price)}</div>
+          <div className="text-sm text-ink-2">{money(c.price)}</div>
           <div className={`text-sm font-bold ${cls}`}>{text}</div>
         </div>
         {c.status === 'holding' && <div className="text-right"><div className="font-display text-2xl font-extrabold tabular-nums text-mint" role="timer">{mmss(left)}</div><div className="text-[11px] text-muted">left to pay</div></div>}

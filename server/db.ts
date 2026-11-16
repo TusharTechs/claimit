@@ -106,6 +106,8 @@ addColumn('claims', 'order_msg_id', 'TEXT');
 addColumn('claims', 'pay_opened', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('claims', 'shipped_at', 'INTEGER');
 addColumn('claims', 'tracking', 'TEXT');
+addColumn('claims', 'paying_at', 'INTEGER'); // when the buyer said "I've paid" (for confirm reminders)
+addColumn('claims', 'reminded', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('sellers', 'phone', 'TEXT');
 addColumn('sellers', 'currency', "TEXT NOT NULL DEFAULT 'INR'");
 addColumn('sellers', 'pay_link', 'TEXT');

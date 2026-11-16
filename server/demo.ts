@@ -4,7 +4,7 @@
 import { config } from './config.ts';
 import { db, now } from './db.ts';
 import { nexconn } from './nexconn.ts';
-import { buyerMarkPaid, claim, q, release, sellerConfirm, sellerUserId } from './engine.ts';
+import { buyerMarkPaid, claim, publishDrop, q, release, sellerConfirm, sellerUserId } from './engine.ts';
 import { MSG } from '../shared/types.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -73,8 +73,13 @@ async function nextRound() {
   later(6000, () => chat(BOTS[2], CHATTER[Math.floor(Math.random() * CHATTER.length)]));
 }
 
+async function republishItem(itemId: string) {
+  const { publishItems } = await import('./engine.ts');
+  publishItems(DEMO_DROP, [itemId]);
+}
+
 function chat(bot: { id: string; name: string }, text: string) {
-  nexconn.sendOpen(`drop_${DEMO_DROP}`, bot.id, MSG.CHAT, { text, name: bot.name }, 3).catch(() => {});
+  nexconn.sendOpen(`drop_${DEMO_DROP}`, bot.id, MSG.CHAT, { text, name: bot.name }).catch(() => {});
 }
 
 /** Called every second: drives bot payments, auto-confirms, and starts the next round. */
@@ -100,10 +105,20 @@ function tick() {
     confirming.add(holder.id);
     later(3000, () => { confirming.delete(holder.id); if (q.claim(holder.id)?.status === 'paying') sellerConfirm(holder.id, SELLER); });
   }
+  // Shared room: if a second real visitor is waiting behind a real visitor, the holder gets 45s max so nobody waits minutes.
+  const humanHolder = holder?.status === 'holding' && !isBot(holder.buyer_id);
+  if (humanHolder && humanWaiting && holder.hold_until && holder.hold_until - now() > 45_000) {
+    db.prepare('UPDATE claims SET hold_until = ? WHERE id = ?').run(now() + 45_000, holder.id);
+    db.prepare('UPDATE items SET version = version + 1 WHERE id = ?').run(current);
+    void republishItem(current);
+  }
   const idleTooLong = it.status === 'live' && now() - phaseAt > 30_000;
-  if (!pendingNext && ((it.status === 'sold' && now() - phaseAt > 8_000) || idleTooLong)) {
+  if (!pendingNext && (it.status === 'sold' || idleTooLong)) {
     pendingNext = true;
-    later(6000, () => { pendingNext = false; nextRound().catch(() => {}); });
+    // Tell the room exactly when the next item lands, so the wait reads as a countdown, not dead air.
+    const wait = it.status === 'sold' ? 6000 : 4000;
+    publishDrop(DEMO_DROP, { status: 'live', current, nextAt: now() + wait });
+    later(wait, () => { pendingNext = false; nextRound().catch(() => {}); });
   }
 }
 let pendingNext = false;

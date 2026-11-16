@@ -9,7 +9,7 @@ import { presence } from './presence.ts';
 import crypto from 'node:crypto';
 import { CURRENCIES, MSG } from '../shared/types.ts';
 import {
-  AppError, buyerMarkPaid, markShipped, claim, closeItem, dropItem, endDrop, logEvent, myClaims, publicDrop,
+  AppError, SYSTEM_USER, republishLive, sellerTrust, buyerMarkPaid, markShipped, claim, closeItem, dropItem, endDrop, logEvent, myClaims, publicDrop,
   q, release, sellerConfirm, sellerUserId, startExpiryLoop, toItem,
 } from './engine.ts';
 import type { AppConfig } from '../shared/types.ts';
@@ -139,6 +139,7 @@ app.get('/api/seller/profiles', h((req) => {
   const ids = String(req.query.ids || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 100);
   return ids.map((userId) => {
     if (userId === sellerUserId(s.id)) return { userId, name: s.shop };
+    if (userId === SYSTEM_USER) return { userId, name: 'ClaimIt' };
     const b = db.prepare(`SELECT b.name FROM buyers b WHERE b.id = ? AND EXISTS (
       SELECT 1 FROM claims c JOIN drops d ON d.id = c.drop_id WHERE c.buyer_id = b.id AND d.seller_id = ?)`).get(userId, s.id) as { name: string } | undefined;
     return { userId, name: b?.name ?? 'Buyer' };
@@ -178,7 +179,7 @@ app.get('/api/seller/drops/:dropId', h(async (req) => {
   const inRoom = await nexconn.participantCount(d.channel_id);
   const items = q.items(d.id).map(toItem);
   const claims = db.prepare(`SELECT c.id, c.item_id AS itemId, c.buyer_id AS buyerId, c.buyer_name AS buyerName, c.status, c.seq,
-      c.created, c.hold_until AS holdUntil, c.utr, c.paid_at AS paidAt,
+      c.created, c.hold_until AS holdUntil, c.utr, c.paid_at AS paidAt, c.paying_at AS payingAt,
       c.ship_phone AS shipPhone, c.ship_address AS shipAddress, c.ship_pincode AS shipPincode, c.shipped_at AS shippedAt, c.tracking
     FROM claims c WHERE c.drop_id = ? ORDER BY c.created DESC`).all(d.id);
   const count = (kind: string, distinct = false) => (db.prepare(
@@ -197,9 +198,25 @@ app.get('/api/seller/drops/:dropId', h(async (req) => {
       revenue,
       viaShares: (db.prepare(`SELECT COUNT(DISTINCT user_id) AS n FROM events WHERE drop_id = ? AND kind = 'join' AND ref IS NOT NULL`).get(d.id) as { n: number }).n,
       followers: (db.prepare('SELECT COUNT(*) AS n FROM follows WHERE seller_id = ?').get(d.seller_id) as { n: number }).n,
+      ...sellerRoi(d.id),
     },
   };
 }));
+
+/** What fair drops were worth to the seller: sales rescued from no-shows, races settled, how fast payments were confirmed. */
+function sellerRoi(dropId: string) {
+  const one = (sql: string) => Number(Object.values(db.prepare(sql).get(dropId) as object)[0] ?? 0);
+  return {
+    // Sold to someone further down the line after an earlier winner didn't pay: in "comment MINE" this sale is usually lost.
+    recovered: one(`SELECT COALESCE(SUM(i.price),0) FROM items i WHERE i.drop_id = ? AND i.status = 'sold' AND EXISTS (
+      SELECT 1 FROM claims c WHERE c.item_id = i.id AND c.status IN ('expired','cancelled','rejected') AND c.created >= COALESCE(i.dropped_at,0))`),
+    recoveredItems: one(`SELECT COUNT(*) FROM items i WHERE i.drop_id = ? AND i.status = 'sold' AND EXISTS (
+      SELECT 1 FROM claims c WHERE c.item_id = i.id AND c.status IN ('expired','cancelled','rejected') AND c.created >= COALESCE(i.dropped_at,0))`),
+    // Items where 2+ people raced: each one a potential "I commented first!" argument.
+    contested: one(`SELECT COUNT(*) FROM (SELECT item_id FROM claims WHERE drop_id = ? GROUP BY item_id HAVING COUNT(*) >= 2)`),
+    avgConfirmSec: Math.round(one(`SELECT COALESCE(AVG(paid_at - paying_at),0) FROM claims WHERE drop_id = ? AND status = 'paid' AND paying_at IS NOT NULL`) / 1000),
+  };
+}
 
 app.patch('/api/seller/drops/:dropId', h((req) => {
   const { d } = ownDrop(req);
@@ -237,6 +254,9 @@ app.post('/api/seller/drops/:dropId/items', h((req) => {
   const name = str(req.body.name, 80, 'Item name');
   const price = Math.round(Number(req.body.price) * 100) / 100;
   if (!Number.isFinite(price) || price <= 0 || price > 10_000_000) throw new AppError(400, 'BAD_PRICE', 'Enter a price');
+  // Each item's live queue is one open-channel metadata key, and a channel holds at most 100 keys (one is the drop state).
+  const count = (db.prepare('SELECT COUNT(*) AS n FROM items WHERE drop_id = ?').get(d.id) as { n: number }).n;
+  if (count >= MAX_ITEMS_PER_DROP) throw new AppError(409, 'TOO_MANY', `A drop can hold ${MAX_ITEMS_PER_DROP} items — start a second drop for the rest`);
   const imageId = saveImage(req.body.image);
   const idx = (db.prepare('SELECT COALESCE(MAX(idx), 0) + 1 AS n FROM items WHERE drop_id = ?').get(d.id) as { n: number }).n;
   const id = rid(8);
@@ -349,6 +369,7 @@ app.get('/api/shops/:sellerId', h((req) => {
     id: s.id, shop: s.shop, name: s.name,
     followers: count('SELECT COUNT(*) FROM follows WHERE seller_id = ?'),
     orders: count(`SELECT COUNT(*) FROM claims c JOIN drops d ON d.id = c.drop_id WHERE d.seller_id = ? AND c.status = 'paid'`),
+    avgConfirmSec: sellerTrust(s.id).avgConfirmSec,
     since: Number(Object.values(db.prepare('SELECT created FROM sellers WHERE id = ?').get(s.id) as object)[0]),
     following: b ? !!db.prepare('SELECT 1 FROM follows WHERE seller_id = ? AND buyer_id = ?').get(s.id, b.id) : false,
     drops: drops.map((d) => ({ ...d, cover: d.cover ? `/img/${d.cover}` : null })),
@@ -381,6 +402,13 @@ app.get('/api/impact', h(() => {
     gmvUsd: Math.round((db.prepare(`SELECT s.currency AS cur, COALESCE(SUM(i.price),0) AS total FROM claims c JOIN items i ON i.id = c.item_id
       JOIN drops d ON d.id = c.drop_id JOIN sellers s ON s.id = d.seller_id WHERE d.practice = 0 AND c.status = 'paid' GROUP BY s.currency`).all() as { cur: string; total: number }[])
       .reduce((a, r) => a + r.total * (USD_RATE[r.cur] ?? 0), 0)),
+    // The always-on demo room is reported separately and clearly labelled (bots included), never mixed into real numbers.
+    demo: {
+      visitors: one(`SELECT COUNT(DISTINCT user_id) FROM events WHERE drop_id = 'demo' AND kind = 'join'`),
+      claimTaps: one(`SELECT COUNT(*) FROM events WHERE drop_id = 'demo' AND kind = 'claim_attempt' AND user_id NOT LIKE 'bot\\_%' ESCAPE '\\'`),
+      rounds: one(`SELECT COUNT(*) FROM events WHERE drop_id = 'demo' AND kind = 'drop'`),
+    },
+    proWaitlist: one('SELECT COUNT(*) FROM pro_waitlist'),
     liveNow: (db.prepare(`SELECT d.id, d.title, s.shop FROM drops d JOIN sellers s ON s.id = d.seller_id
       WHERE d.status = 'live' AND d.practice = 0 AND EXISTS (SELECT 1 FROM items i WHERE i.drop_id = d.id AND i.status != 'draft') ORDER BY d.created DESC LIMIT 5`).all()),
   };
@@ -484,6 +512,7 @@ app.post('/api/claims/:claimId/release', h((req) => {
 // events: user:connection_status, open_channel:pre_messaging, direct_channel:pre_messaging.
 
 const seenWebhookTypes = new Set<string>();
+const MAX_ITEMS_PER_DROP = 90;
 const PAY_SCAM = /([\w.\-]{2,}@[a-z][\w-]*(?:\.[\w-]+)*)|((?:paypal\.me|venmo\.com|cash\.app|wa\.me|gcash\.me)\/\S+)|(\$[A-Za-z][\w]{2,})|(\+?\d[\d\s().-]{6,}\d)/gi;
 /** Mask payment handles, emails and phone numbers (9+ digits, so sizes, prices and years stay readable). */
 const maskPay = (text: string) => text.replace(PAY_SCAM, (m, _e, _l, _t, phone) => (phone && m.replace(/\D/g, '').length < 9 ? m : '•••'));
@@ -498,6 +527,9 @@ export function moderateRoomChat(senderId: string, channelId: string, messageTyp
   let c: { text?: string; name?: string } = {};
   try { c = JSON.parse(rawContent); } catch { return { pass: 0, extra: 'bad_content' }; }
   const real = (db.prepare('SELECT name FROM buyers WHERE id = ?').get(senderId) as { name: string } | undefined)?.name ?? 'Buyer';
+  // Escalation: after 3 attempts to post payment details, this person is muted for the rest of the drop.
+  const strikes = (db.prepare(`SELECT COUNT(*) AS n FROM events WHERE drop_id = ? AND user_id = ? AND kind = 'scam_masked'`).get(d.id, senderId) as { n: number }).n;
+  if (strikes >= 3) { logEvent(d.id, 'muted_blocked', senderId); return { pass: 0, extra: 'muted' }; }
   const text = String(c.text ?? '').slice(0, 200);
   const masked = maskPay(text);
   if (masked !== text) logEvent(d.id, 'scam_masked', senderId);
@@ -529,8 +561,13 @@ app.post('/api/nexconn/webhook', express.json({ limit: '1mb' }), (req, res) => {
   if (type === 'direct_channel:pre_messaging') {
     // Order cards and status lines (CI:*) may only come from a shop: a buyer can't forge "Payment confirmed".
     const e = data[0] || {};
-    const fake = String(e.messageType ?? '').startsWith('CI:') && !String(e.userId ?? '').startsWith('s_');
-    return res.json(fake ? { pass: 0 } : { pass: 1 });
+    const from = String(e.userId ?? e.fromUserId ?? '');
+    const to = String(e.toUserId ?? e.targetId ?? e.channelId ?? '');
+    const fake = String(e.messageType ?? '').startsWith('CI:') && !from.startsWith('s_');
+    // Buyer ids are visible in the public queue, so buyers may only DM shops: no "pay me instead" DMs to people in line.
+    const buyerToBuyer = !!to && !from.startsWith('s_') && !to.startsWith('s_');
+    if (fake || buyerToBuyer) { logEvent('', fake ? 'spoof_blocked' : 'dm_blocked', from); return res.json({ pass: 0 }); }
+    return res.json({ pass: 1 });
   }
   if (type.endsWith(':pre_messaging')) return res.json({ pass: 1 });
   res.json({ ok: true });
@@ -653,6 +690,7 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 startExpiryLoop();
+setTimeout(() => console.log(`[boot] republished ${republishLive()} live drop(s)`), 1500);
 import('./demo.ts').then((m) => m.startDemo()).catch((e) => console.error('[demo] failed to start', e));
 app.listen(config.port, () => {
   console.log(`ClaimIt server on http://localhost:${config.port} (mode: ${config.mode}${config.mode === 'nexconn' ? `, area ${config.nexconn.area}` : ''})`);

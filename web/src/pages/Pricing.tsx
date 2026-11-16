@@ -44,11 +44,10 @@ export default function Pricing() {
             <Link to="/sell" className="btn mt-7 w-full bg-ink py-3.5 text-white">Start a drop</Link>
           </div>
           <div className="relative rounded-[28px] bg-ink p-7 text-white shadow-[var(--shadow-pop)]">
-            <div className="absolute -top-3 right-6 flex items-center gap-1 rounded-full bg-sun px-3 py-1 text-xs font-bold text-ink"><Sparkles className="size-3.5" /> Founding 100 sellers: free for life</div>
+            <div className="absolute -top-3 right-6 flex items-center gap-1 rounded-full bg-sun px-3 py-1 text-xs font-bold text-ink"><Sparkles className="size-3.5" /> Founding sellers: 50% off year one</div>
             <div className="font-display text-2xl font-bold">Pro</div>
             <div className="mt-2 font-display text-5xl font-extrabold">$9<span className="text-xl font-bold text-white/70">/month</span></div>
-            <div className="text-sm text-white/70">Local pricing in every market</div>
-            <div className="text-sm text-white/70">or 1.5% of sales, whichever is lower</div>
+            <div className="text-sm text-white/70">Flat fee, still 0% commission · local pricing in every market</div>
             <ul className="mt-6 space-y-2.5">{PRO.map((f) => <li key={f} className="flex gap-2"><Check className="mt-0.5 size-5 shrink-0 text-sun" />{f}</li>)}</ul>
             {done ? (
               <div className="mt-7 rounded-2xl bg-white/10 p-4 text-center font-semibold">You're on the list 🎉 We'll reach out when Pro opens.</div>

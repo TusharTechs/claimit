@@ -71,7 +71,7 @@ body {
 /* sonner toasts in brand colours */
 [data-sonner-toast].claimit-toast { background: var(--color-ink); color: #fff; border: none; justify-content: center; }
 [data-sonner-toast].claimit-toast[data-type="success"] { background: var(--color-mint); }
-[data-sonner-toast].claimit-toast.claimit-toast-hot { background: var(--color-hot); }
+[data-sonner-toast].claimit-toast.claimit-toast-hot { background: var(--color-hot-dark); }
 [data-sonner-toast].claimit-toast [data-icon] { color: #fff; }
 
 @keyframes shrink { from { transform: scaleX(1) } to { transform: scaleX(0) } }

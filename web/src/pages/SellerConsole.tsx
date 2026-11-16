@@ -6,7 +6,7 @@ import { Avatar, ConfirmSheet, CopyButton, ItemThumb, Logo, QR, Sheet, Spinner, 
 import { Play } from 'lucide-react';
 import { DMThread } from '../components/DMThread';
 import { chatUIReady, mountChatUI, openDirect, setupChatUI } from '../chatui';
-import { currencySymbol, mmss, resizeImage, rupees, setCurrency, useCountdown, useDebounced } from '../util';
+import { currencySymbol, mmss, money, resizeImage, setCurrency, telHref, useCountdown, useDebounced } from '../util';
 import { MSG, type ChatContent, type EventContent, type Item } from '../../../shared/types';
 
 type Tab = 'pay' | 'room' | 'inbox';
@@ -16,7 +16,14 @@ export default function SellerConsole() {
   const nav = useNavigate();
   const [data, setData] = useState<SellerDrop | null>(null);
   const [tab, setTab] = useState<Tab>('pay');
-  const [feed, setFeed] = useState<{ id: string; text: string; who?: string; kind: string }[]>([]);
+  const [feed, setFeed] = useState<{ id: string; text: string; who?: string; from?: string; mine?: boolean; kind: string }[]>([]);
+  // Chat names come from the server by sender id, never from the message body (which a buyer controls).
+  const [people, setPeople] = useState<Record<string, { name: string; seller?: boolean }>>({});
+  const wantedNames = useRef(new Set<string>());
+  const resolveNames = useDebounced(async () => {
+    const ids = [...wantedNames.current]; wantedNames.current.clear();
+    if (ids.length) try { const r = await api.people(dropId, ids); setPeople((p) => ({ ...p, ...r })); } catch { /* ignore */ }
+  }, 300);
   const [viewers, setViewers] = useState<number | null>(null);
   const [unread, setUnread] = useState<Record<string, number>>({});
   const [inboxPeer, setInboxPeer] = useState<string | null>(null);
@@ -70,7 +77,11 @@ export default function SellerConsole() {
     const offCount = rt.onParticipants((cid, n) => cid === channelId && setViewers(n));
     const offMsg = rt.onMessage((m: RtMessage) => {
       if (m.kind === 'open' && m.channelId === channelId) {
-        if (m.type === MSG.CHAT) { const c = m.content as ChatContent; setFeed((f) => [...f.slice(-120), { id: m.id, text: c.text, who: c.name, kind: 'chat' }]); }
+        if (m.type === MSG.CHAT) {
+          const c = m.content as ChatContent;
+          if (!m.mine) { wantedNames.current.add(m.sender); resolveNames(); }
+          setFeed((f) => f.some((x) => x.id === m.id) ? f : [...f.slice(-120), { id: m.id, text: c.text, from: m.sender, mine: m.mine, kind: 'chat' }]);
+        }
         else if (m.type === MSG.EVENT) { const ev = m.content as EventContent; setFeed((f) => [...f.slice(-120), { id: m.id, text: ev.text, kind: ev.kind }]); refresh(); }
       } else if (m.kind === 'direct' && !m.mine) {
         if (!(tabRef.current === 'inbox' && peerRef.current === m.channelId)) setUnread((u) => ({ ...u, [m.channelId]: (u[m.channelId] || 0) + 1 }));
@@ -146,7 +157,7 @@ export default function SellerConsole() {
           {chatUI && (
             <button onClick={() => openInbox()} className="btn relative bg-ink px-3 py-1.5 text-sm text-white">
               Inbox
-              {totalUnread > 0 && <span className="absolute -right-1 -top-1 grid size-5 place-items-center rounded-full bg-hot text-[11px]">{totalUnread}</span>}
+              {totalUnread > 0 && <span className="absolute -right-1 -top-1 grid size-5 place-items-center rounded-full bg-hot-dark text-[11px]">{totalUnread}</span>}
             </button>
           )}
           <a href={link} target="_blank" rel="noreferrer" className="btn hidden border-2 border-ink px-3 py-1.5 text-sm sm:inline-flex">Open buyer view ↗</a>
@@ -195,7 +206,7 @@ export default function SellerConsole() {
                 </select>
               </label>
               <div className="mt-3 grid grid-cols-3 gap-2 text-center sm:grid-cols-6">
-                {[['Joined', stats.viewers], ['Via shares', stats.viaShares], ['Claim taps', stats.claimAttempts], ['Sold', stats.sold], ['Revenue', rupees(stats.revenue)], ['Followers', stats.followers]].map(([k, v]) => (
+                {[['Joined', stats.viewers], ['Via shares', stats.viaShares], ['Claim taps', stats.claimAttempts], ['Sold', stats.sold], ['Revenue', money(stats.revenue)], ['Followers', stats.followers]].map(([k, v]) => (
                   <div key={k as string} className="rounded-xl bg-paper px-1 py-2">
                     <div className="font-display text-lg font-extrabold leading-none">{v}</div>
                     <div className="mt-1 text-[11px] text-muted">{k}</div>
@@ -255,9 +266,17 @@ export default function SellerConsole() {
                 <div className="scroll-thin min-h-0 flex-1 space-y-1.5 overflow-y-auto">
                   {feed.length === 0 && <p className="py-8 text-center text-sm text-muted">Live chat and claims from the room appear here.</p>}
                   {feed.map((f) => f.kind === 'chat'
-                    ? <div key={f.id} className="text-[14px]"><b>{f.who}</b> <span className="text-ink-2">{f.text}</span></div>
+                    ? <div key={f.id} className="text-[14px]">{f.mine
+                        ? <><span className="rounded bg-ink px-1.5 py-0.5 text-[11px] font-bold text-white">You</span> <span className="text-ink">{f.text}</span></>
+                        : <><b>{people[f.from ?? '']?.name ?? '…'}</b> <span className="text-ink-2">{f.text}</span></>}</div>
                     : <div key={f.id} className={`w-fit rounded-full px-2.5 py-0.5 text-[13px] font-semibold ${f.kind === 'sold' ? 'bg-mint-soft text-mint' : 'bg-hot-soft text-hot-dark'}`}>{f.text}</div>)}
                 </div>
+              )}
+              {tab === 'room' && channelId && (
+                <RoomReply onSend={async (text) => {
+                  const sent = await rt.sendOpen(channelId, MSG.CHAT, { text, name: drop.shop });
+                  if (sent) setFeed((f) => f.some((x) => x.id === sent.id) ? f : [...f.slice(-120), { id: sent.id, text, mine: true, kind: 'chat' }]);
+                }} />
               )}
               {tab === 'inbox' && chatUI && (
                 <div className="flex min-h-0 flex-1 flex-col">
@@ -268,7 +287,7 @@ export default function SellerConsole() {
                       <button key={b.id} onClick={() => openInbox(b.id)} className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left hover:bg-paper">
                         <Avatar id={b.id} name={b.name} size={32} />
                         <span className="flex-1 font-semibold">{b.name}</span>
-                        {unread[b.id] ? <span className="grid size-5 place-items-center rounded-full bg-hot text-[11px] font-bold text-white">{unread[b.id]}</span> : null}
+                        {unread[b.id] ? <span className="grid size-5 place-items-center rounded-full bg-hot-dark text-[11px] font-bold text-white">{unread[b.id]}</span> : null}
                       </button>
                     ))}
                   </div>
@@ -290,7 +309,7 @@ export default function SellerConsole() {
                         className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left hover:bg-paper">
                         <Avatar id={b.id} name={b.name} size={32} />
                         <span className="flex-1 font-semibold">{b.name}</span>
-                        {unread[b.id] ? <span className="grid size-5 place-items-center rounded-full bg-hot text-[11px] font-bold text-white">{unread[b.id]}</span> : null}
+                        {unread[b.id] ? <span className="grid size-5 place-items-center rounded-full bg-hot-dark text-[11px] font-bold text-white">{unread[b.id]}</span> : null}
                       </button>
                     ))}
                   </div>
@@ -327,7 +346,7 @@ export default function SellerConsole() {
       <ConfirmSheet open={confirmEnd} onClose={() => setConfirmEnd(false)} title="End this drop?" tone="ink"
         body="Buyers won't be able to claim anything else. Orders already claimed stay as they are." confirmLabel="End drop"
         onConfirm={() => act(() => api.endDrop(drop.id), 'Drop ended — here is your recap')} />
-      <ConfirmSheet open={!!confirmPay} onClose={() => setConfirmPay(null)} title={`Did ${rupees(items.find((i) => i.id === confirmPay?.itemId)?.price ?? 0)} arrive?`} tone="mint"
+      <ConfirmSheet open={!!confirmPay} onClose={() => setConfirmPay(null)} title={`Did ${money(items.find((i) => i.id === confirmPay?.itemId)?.price ?? 0)} arrive?`} tone="mint"
         body={<>Check your payment app for a payment from <b>{confirmPay?.buyerName}</b>{confirmPay?.utr ? <> with reference <b>{confirmPay.utr}</b></> : null}. Confirming marks the item sold and tells the buyer.</>}
         confirmLabel="Yes, payment received" onConfirm={() => confirmPay && act(() => api.confirm(confirmPay.id), `Sold to ${confirmPay.buyerName} ✓`)} />
       <ConfirmSheet open={!!confirmSkip} onClose={() => setConfirmSkip(null)} title={`Skip ${confirmSkip?.buyerName}?`} tone="ink"
@@ -428,7 +447,7 @@ function ItemRow({ it, claims, ended, isNext, holdSeconds, onDrop, onClose, onDe
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2"><span className="text-xs font-bold text-muted">#{it.idx}</span><StatusChip status={it.status} /></div>
           <div className="truncate font-semibold">{it.name}</div>
-          <div className="text-sm text-ink-2">{rupees(it.price)}</div>
+          <div className="text-sm text-ink-2">{money(it.price)}</div>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           {(it.status === 'draft' || it.status === 'closed') && !ended && (
@@ -486,7 +505,7 @@ function ShipTo({ c }: { c: SellerClaim }) {
   return (
     <div className="mt-2 rounded-xl bg-paper px-3 py-2 text-[13px] leading-snug text-ink-2">
       <span className="font-semibold text-ink">Ship to {c.buyerName}:</span> {c.shipAddress} — {c.shipPincode}
-      {c.shipPhone && <> · <a className="font-semibold text-ink underline" href={`tel:+91${c.shipPhone}`}>{c.shipPhone}</a></>}
+      {c.shipPhone && <> · <a className="font-semibold text-ink underline" href={telHref(c.shipPhone)}>{c.shipPhone}</a></>}
     </div>
   );
 }
@@ -502,7 +521,7 @@ function PayRow({ c, it, holdSeconds, onConfirm, onReject, onChat }: {
         <Avatar id={c.buyerId} name={c.buyerName} size={28} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold">{c.buyerName} · {it?.name}</div>
-          <div className="text-xs text-ink-2">{rupees(it?.price ?? 0)} · {paying ? <b className="text-mint">says they paid{c.utr ? ` · ref ${c.utr}` : ''}</b> : <>waiting for payment · <span className="tabular-nums">{mmss(left)}</span></>}</div>
+          <div className="text-xs text-ink-2">{money(it?.price ?? 0)} · {paying ? <b className="text-mint">says they paid{c.utr ? ` · ref ${c.utr}` : ''}</b> : <>waiting for payment · <span className="tabular-nums">{mmss(left)}</span></>}</div>
         </div>
       </div>
       {!paying && c.holdUntil && (
@@ -526,13 +545,24 @@ function Recap({ stats, items, claims, shop }: { stats: SellerDrop['stats']; ite
   const raced = new Set(claims.map((c) => c.itemId)).size ? items.filter((i) => claims.filter((c) => c.itemId === i.id).length > 1).length : 0;
   const paid = claims.filter((c) => c.status === 'paid' && c.paidAt && c.created);
   const avgPay = paid.length ? Math.round(paid.reduce((a, c) => a + ((c.paidAt as number) - c.created), 0) / paid.length / 1000) : null;
-  const text = `🔥 ${shop}'s drop: ${sold}/${dropped} sold · ${rupees(stats.revenue)} · ${stats.claimAttempts} claim taps · 0 double-claims. Run fair live drops with ClaimIt.`;
+  const text = `🔥 ${shop}'s drop: ${sold}/${dropped} sold · ${money(stats.revenue)}${stats.recovered ? ` (${money(stats.recovered)} rescued from no-shows)` : ''} · ${raced} races settled fairly · 0 double-claims. Run fair live drops with ClaimIt.`;
   return (
     <section className="overflow-hidden rounded-[26px] bg-ink p-5 text-white shadow-[var(--shadow-card)]">
       <div className="text-xs font-bold uppercase tracking-wider text-white/60">Drop recap</div>
-      <div className="mt-1 font-display text-4xl font-extrabold leading-none">{sold}/{dropped} sold · {rupees(stats.revenue)}</div>
-      <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        {[['Buyers joined', stats.viewers], ['Claim taps', stats.claimAttempts], ['Items with a race', raced], ['Avg time to pay', avgPay !== null ? mmss(avgPay * 1000) : '—']].map(([k, v]) => (
+      <div className="mt-1 font-display text-4xl font-extrabold leading-none">{sold}/{dropped} sold · {money(stats.revenue)}</div>
+      {/* What fairness was worth: sales "comment MINE" would have lost, and arguments that never happened. */}
+      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        <div className="rounded-xl bg-mint px-3 py-2.5">
+          <div className="font-display text-2xl font-extrabold">{money(stats.recovered ?? 0)}</div>
+          <div className="text-xs text-white/90">rescued from no-shows: {stats.recoveredItems ?? 0} item{stats.recoveredItems === 1 ? '' : 's'} sold to the next in line automatically</div>
+        </div>
+        <div className="rounded-xl bg-white/10 px-3 py-2.5">
+          <div className="font-display text-2xl font-extrabold">{raced}</div>
+          <div className="text-xs text-white/80">races settled with zero “I commented first!” disputes</div>
+        </div>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
+        {[['Buyers joined', stats.viewers], ['Claim taps', stats.claimAttempts], ['Items with a race', raced], ['Avg time to pay', avgPay !== null ? mmss(avgPay * 1000) : '—'], ['Your avg confirm', stats.avgConfirmSec ? mmss(stats.avgConfirmSec * 1000) : '—']].map(([k, v]) => (
           <div key={k as string} className="rounded-xl bg-white/10 px-3 py-2"><div className="font-display text-xl font-extrabold">{v}</div><div className="text-[11px] text-white/70">{k}</div></div>
         ))}
       </div>
@@ -542,5 +572,30 @@ function Recap({ stats, items, claims, shop }: { stats: SellerDrop['stats']; ite
         <a className="btn bg-[#25D366] px-4 py-2 text-sm text-white" target="_blank" rel="noreferrer" href={`https://wa.me/?text=${encodeURIComponent(text)}`}>Share on WhatsApp</a>
       </div>
     </section>
+  );
+}
+
+/** The shop answers the room: buyers see these with a "Seller" badge (server-verified sender). */
+function RoomReply({ onSend }: { onSend: (text: string) => Promise<void> }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const send = async (t: string) => {
+    const v = t.trim();
+    if (!v || busy) return;
+    setBusy(true);
+    try { await onSend(v.slice(0, 200)); setText(''); } finally { setBusy(false); }
+  };
+  return (
+    <div className="mt-2 border-t border-line pt-2">
+      <div className="scroll-thin flex gap-1.5 overflow-x-auto pb-1.5">
+        {['Yes, true to size ✅', 'Ships worldwide 🌍', 'Next item in 1 min ⏳', 'Sorry, sold out 🙏'].map((q) => (
+          <button key={q} className="shrink-0 rounded-full bg-paper px-3 py-1 text-xs font-semibold hover:bg-line" disabled={busy} onClick={() => send(q)}>{q}</button>
+        ))}
+      </div>
+      <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); send(text); }}>
+        <input className="input !py-2 text-sm" value={text} onChange={(e) => setText(e.target.value)} maxLength={200} placeholder="Reply to the room…" aria-label="Reply to the room" />
+        <button className="btn bg-ink px-4 text-sm text-white" disabled={busy || !text.trim()}>{busy ? <Spinner /> : 'Send'}</button>
+      </form>
+    </div>
   );
 }

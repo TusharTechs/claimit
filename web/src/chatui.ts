@@ -16,7 +16,7 @@ const avatar = (id: string, name: string) => {
 let app: NCChatUIApplication | null = null;
 let root: HTMLElement | null = null;
 
-const rupees = (n: number, currency = 'INR') => money(Number(n || 0), currency);
+const price = (n: number, currency = 'USD') => money(Number(n || 0), currency);
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
 function contentOf<T>(m: any): T {
@@ -64,7 +64,7 @@ class OrderBubble extends HTMLElement {
         <div style="display:flex;gap:10px;align-items:center;margin-top:6px">${img}
           <div style="min-width:0">
             <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(o.itemName)}</div>
-            <div style="font-size:13px;color:#3a312a">${rupees(o.price, o.currency)} · ${o.upi ? 'UPI ' + esc(o.upi) : o.payLink ? 'payment link' : 'bank / wallet transfer'}</div>
+            <div style="font-size:13px;color:#3a312a">${price(o.price, o.currency)} · ${o.upi ? 'UPI ' + esc(o.upi) : o.payLink ? 'payment link' : 'bank / wallet transfer'}</div>
           </div>
         </div>
       </div>`;

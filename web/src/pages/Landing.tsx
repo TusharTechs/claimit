@@ -126,7 +126,7 @@ const COMPARE: [string, string, string][] = [
 const FAQ: [string, string][] = [
   ['Do buyers need to install an app or sign up?', 'No. They tap your link and they’re in. A name is asked only when they claim something.'],
   ['Does ClaimIt take a cut of my sales?', 'No. Buyers pay you directly — PayPal, Venmo, Stripe, GCash, UPI or any payment link. The free plan is free forever; Pro is optional.'],
-  ['Which countries and currencies work?', 'All of them. Pick your currency when you set up — dollars, euros, pounds, pesos, rupiah, rupees and more. The same “comment SOLD / MINE” chaos happens on every live-selling platform, and live rooms run on Nexconn’s global network.'],
+  ['Which countries and currencies work?', 'All of them. Pick your currency when you set up — dollars, euros, pounds, pesos, rupiah and more. The same “comment SOLD / MINE” chaos happens on every live-selling platform, and live rooms run on Nexconn’s global network.'],
   ['I go live on Instagram. How does this fit?', 'Keep going live on Instagram as usual. Put your ClaimIt link in your story, bio or pinned comment, and say “#12 is up!” — buyers claim in ClaimIt instead of commenting.'],
   ['What if the winner doesn’t pay?', 'You choose 2–15 minutes. When it runs out, the next person in line is promoted automatically and gets the order card.'],
   ['How many people can join a drop?', 'As many as you can bring. Live rooms run on Nexconn open channels built for huge live-stream audiences; product drops are priority messages that land even when chat is flooding.'],
@@ -136,7 +136,7 @@ export default function Landing() {
   const [impact, setImpact] = useState<Impact | null>(null);
   const [open, setOpen] = useState<number | null>(0);
   useEffect(() => { api.impact().then(setImpact).catch(() => {}); }, []);
-  const showImpact = impact && impact.buyers >= 10;
+  const showImpact = impact && impact.buyers >= 25;
 
   return (
     <div className="min-h-full overflow-x-hidden">
@@ -155,11 +155,11 @@ export default function Landing() {
         <section className="mx-auto grid max-w-6xl items-center gap-x-12 gap-y-8 px-4 pb-16 pt-6 sm:px-6 md:grid-cols-[1.1fr_1fr] md:pt-12">
           <div className="md:col-start-1 md:row-start-1">
             {impact?.liveNow?.[0] ? (
-              <Link to={`/d/${impact.liveNow[0].id}`} className="mb-5 inline-flex items-center gap-2 rounded-full bg-hot px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white">
+              <Link to={`/d/${impact.liveNow[0].id}`} className="mb-5 inline-flex items-center gap-2 rounded-full bg-hot-dark px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white">
                 <span className="anim-live size-2 rounded-full bg-white" /> Live now: {impact.liveNow[0].shop}
               </Link>
             ) : (
-              <Link to="/d/demo" className="mb-5 inline-flex items-center gap-2 rounded-full bg-hot px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white">
+              <Link to="/d/demo" className="mb-5 inline-flex items-center gap-2 rounded-full bg-hot-dark px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white">
                 <span className="anim-live size-2 rounded-full bg-white" /> Demo drop is live — try to beat the bots →
               </Link>
             )}

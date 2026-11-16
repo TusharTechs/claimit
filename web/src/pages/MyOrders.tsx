@@ -37,7 +37,7 @@ export default function MyOrders() {
                 <h2 className="text-xs font-bold uppercase tracking-wider text-muted">Live now from shops you follow</h2>
                 <div className="mt-2 space-y-2">
                   {live.map((f) => (
-                    <Link key={f.id} to={`/d/${f.liveDrop}`} className="flex items-center gap-3 rounded-2xl bg-hot p-4 text-white shadow-[var(--shadow-pop)]">
+                    <Link key={f.id} to={`/d/${f.liveDrop}`} className="flex items-center gap-3 rounded-2xl bg-hot-dark p-4 text-white shadow-[var(--shadow-pop)]">
                       <span className="anim-live size-2.5 rounded-full bg-white" />
                       <div className="min-w-0 flex-1"><div className="font-bold">{f.shop}</div><div className="truncate text-sm text-white/85">{f.liveTitle}</div></div>
                       <span className="font-bold">Join →</span>
@@ -62,7 +62,7 @@ export default function MyOrders() {
                       : o.status === 'paid' && o.shippedAt ? ORDER_STATUS.shipped! : ORDER_STATUS[o.status] ?? { label: o.status, tone: 'muted' as const };
                     return (
                       <li key={o.id}>
-                        <Link to={`/d/${o.dropId}`} className="flex items-center gap-3 rounded-2xl border border-line bg-card p-3 shadow-sm hover:border-ink/30">
+                        <Link to={`/d/${o.dropId}?order=${o.id}`} className="flex items-center gap-3 rounded-2xl border border-line bg-card p-3 shadow-sm hover:border-ink/30">
                           <div className="size-14 shrink-0 overflow-hidden rounded-xl bg-line"><ItemThumb name={o.itemName} image={o.image} /></div>
                           <div className="min-w-0 flex-1">
                             <div className="truncate font-semibold">{o.itemName}</div>

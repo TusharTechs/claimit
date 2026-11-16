@@ -58,7 +58,7 @@ async function req<T>(method: string, path: string, body?: unknown, auth?: 'sell
 export interface SellerDropSummary { id: string; title: string; status: string; created: number; items: number; sold: number }
 export interface SellerClaim {
   id: string; itemId: string; buyerId: string; buyerName: string; status: MyClaim['status'];
-  seq: number; created: number; holdUntil: number | null; utr: string | null; paidAt: number | null;
+  seq: number; created: number; holdUntil: number | null; utr: string | null; paidAt: number | null; payingAt?: number | null;
   shipPhone: string | null; shipAddress: string | null; shipPincode: string | null; shippedAt: number | null; tracking: string | null;
 }
 export interface Shipping { phone: string; address: string; pincode: string }
@@ -66,13 +66,15 @@ export interface SellerDrop {
   drop: PublicDrop;
   items: Item[];
   claims: SellerClaim[];
-  stats: { viewers: number; claimAttempts: number; claimers: number; sold: number; revenue: number; viaShares: number; followers: number };
+  stats: { viewers: number; claimAttempts: number; claimers: number; sold: number; revenue: number; viaShares: number; followers: number;
+    recovered: number; recoveredItems: number; contested: number; avgConfirmSec: number };
 }
 
 export interface ShopDrop { id: string; title: string; status: 'live' | 'ended'; created: number; items: number; sold: number; cover: string | null }
-export interface Shop { id: string; shop: string; name: string; followers: number; orders: number; since: number; following: boolean; drops: ShopDrop[] }
+export interface Shop { id: string; shop: string; name: string; followers: number; orders: number; since: number; avgConfirmSec?: number | null; following: boolean; drops: ShopDrop[] }
 export interface Impact {
   sellers: number; drops: number; buyers: number; claimsSettled: number; contestedItems: number; itemsSold: number; gmvUsd: number;
+  demo?: { visitors: number; claimTaps: number; rounds: number }; proWaitlist?: number;
   liveNow: { id: string; title: string; shop: string }[];
 }
 

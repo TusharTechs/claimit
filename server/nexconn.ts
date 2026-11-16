@@ -91,12 +91,16 @@ export const nexconn = {
     });
   },
 
-  /** Sends to the live room. priority 2 = high (product drops & claim events must land even when chat floods). */
-  async sendOpen(channelId: string, fromUserId: string, messageType: string, content: unknown, priority = 2) {
+  /**
+   * Sends to the live room. Load shedding works on two levels: message *types* (CI:Drop/CI:Event are registered as
+   * priority types, CI:Chat as a low-priority type by `npm run setup:nexconn`) and the per-message `priority` flag,
+   * which we set to 2 (high) for every server-sent drop and claim event. Chat is sent without the flag.
+   */
+  async sendOpen(channelId: string, fromUserId: string, messageType: string, content: unknown, priority?: number) {
     if (mock) return mockbus.sendOpen(channelId, fromUserId, messageType, content);
     await call('/v4/open-channel/message/send', {
       fromUserId, toChannelIds: [channelId], messageType,
-      content: JSON.stringify(content), shouldPersist: 0, isEchoToSender: 1, priority,
+      content: JSON.stringify(content), shouldPersist: 0, isEchoToSender: 1, ...(priority !== undefined ? { priority } : {}),
     }, false);
   },
 

@@ -1,0 +1,62 @@
+// Concurrency proof for the claim arbiter: N buyers tap Claim on the same item at the same moment.
+//
+//   npm run dev:mock            (or any running ClaimIt server)
+//   npx tsx scripts/race.ts [N] [baseUrl]
+//
+// Run it against a local/mock server only: it creates a test shop and drop.
+// Asserts: exactly one winner, a gap-free waitlist in tap order, everyone else told "full",
+// the public state agrees with what each buyer was told, and releasing the winner promotes #1.
+const N = Number(process.argv[2] || 200);
+const BASE = process.argv[3] || process.env.BASE || 'http://localhost:8787';
+
+type Json = Record<string, any>;
+async function call(method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<{ status: number; json: Json }> {
+  const res = await fetch(BASE + path, { method, headers: { 'content-type': 'application/json', ...headers }, body: body ? JSON.stringify(body) : undefined });
+  return { status: res.status, json: await res.json().catch(() => ({})) };
+}
+let failed = 0;
+const check = (ok: boolean, what: string) => { console.log(`${ok ? '✓' : '✗'} ${what}`); if (!ok) failed++; };
+
+const s = (await call('POST', '/api/sellers', { name: 'Race', shop: 'Race Test Shop', currency: 'USD', upi: 'https://paypal.me/racetest' })).json;
+const sh = { 'x-seller-id': s.id, 'x-seller-key': s.key };
+const drop = (await call('POST', '/api/seller/drops', { title: `Race ×${N}` }, sh)).json;
+const item = (await call('POST', `/api/seller/drops/${drop.id}/items`, { name: 'Contested jacket', price: 42 }, sh)).json;
+await call('POST', `/api/seller/drops/${drop.id}/items/${item.id}/drop`, {}, sh);
+const before = (await call('GET', `/api/drops/${drop.id}`)).json.state[item.id]?.v ?? 0;
+
+const buyers = await Promise.all(Array.from({ length: N }, (_, i) => call('POST', '/api/buyers', { name: `Racer ${i + 1}` }).then((r) => r.json)));
+console.log(`${N} buyers ready — firing ${N} simultaneous claims at ${BASE}`);
+
+const t0 = performance.now();
+const results = await Promise.all(buyers.map((b) =>
+  call('POST', `/api/drops/${drop.id}/items/${item.id}/claim`, {}, { 'x-buyer-id': b.id, 'x-buyer-key': b.key }).then((r) => ({ b, ...r }))));
+const ms = Math.round(performance.now() - t0);
+
+const won = results.filter((r) => r.status === 200 && r.json.position === 0);
+const waiting = results.filter((r) => r.status === 200 && r.json.position > 0);
+const full = results.filter((r) => r.status === 409 && r.json.error === 'FULL');
+const other = results.filter((r) => !won.includes(r) && !waiting.includes(r) && !full.includes(r));
+console.log(`settled in ${ms} ms: ${won.length} winner, ${waiting.length} waiting, ${full.length} told "full", ${other.length} other`);
+
+check(won.length === 1, 'exactly one winner');
+const positions = waiting.map((r) => r.json.position).sort((a, b) => a - b);
+check(positions.every((p, i) => p === i + 1), `waitlist positions are 1..${positions.length} with no gaps or duplicates`);
+check(other.length === 0, `every other buyer got a clear "waitlist full" answer${other.length ? ` (unexpected: ${JSON.stringify(other[0]?.json)})` : ''}`);
+
+const st = (await call('GET', `/api/drops/${drop.id}`)).json.state[item.id];
+check(st.holder?.id === won[0]?.b.id, 'public state shows the same winner the winner was told');
+const byPos = [...waiting].sort((a, b) => a.json.position - b.json.position).map((r) => r.b.id);
+check(JSON.stringify(st.waitlist.map((w: Json) => w.id)) === JSON.stringify(byPos), 'public waitlist order matches each buyer\'s position');
+check(st.v > before, `state version advanced (${before} → ${st.v})`);
+
+// The winner lets it go: the first in line must be promoted, and only them.
+const w = won[0]!;
+await call('POST', `/api/claims/${w.json.id}/release`, {}, { 'x-buyer-id': w.b.id, 'x-buyer-key': w.b.key });
+const after = (await call('GET', `/api/drops/${drop.id}`)).json.state[item.id];
+check(after.holder?.id === byPos[0], 'releasing the winner promotes #1 in line');
+check(after.waitlist.length === byPos.length - 1 && after.v > st.v, 'waitlist shrank by one and the version advanced again');
+
+await call('POST', `/api/seller/drops/${drop.id}/end`, {}, sh);
+console.log(failed ? `\n${failed} check(s) FAILED` : '\nAll checks passed: no double-claims under contention.');
+process.exit(failed ? 1 : 0);
+export {};

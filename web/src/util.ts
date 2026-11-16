@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react';
 
 // Prices are shown in the shop's currency. Pages set it once when the drop/shop loads.
-let currentCurrency = 'INR';
+let currentCurrency = 'USD';
 export const setCurrency = (c?: string | null) => { if (c) currentCurrency = c; };
+export const getCurrency = () => currentCurrency;
+/** "~2 min" / "~40 s" for a duration in seconds. */
+export const approx = (sec: number) => (sec < 90 ? `~${Math.max(5, Math.round(sec / 5) * 5)} s` : `~${Math.round(sec / 60)} min`);
+/** tel: link for a buyer's phone: Indian 10-digit numbers get +91, others are stored with their country code. */
+export const telHref = (phone: string) => `tel:${phone.startsWith('+') ? phone : currentCurrency === 'INR' && /^[6-9]\d{9}$/.test(phone) ? `+91${phone}` : `+${phone}`}`;
 export const money = (n: number, currency = currentCurrency) => {
   try {
     return new Intl.NumberFormat(currency === 'INR' ? 'en-IN' : 'en', { style: 'currency', currency, maximumFractionDigits: Number.isInteger(n) ? 0 : 2 }).format(n);
   } catch { return `${currency} ${n}`; }
 };
-/** Kept for existing call sites: formats in the current shop currency. */
-export const rupees = (n: number) => money(n);
 export const currencySymbol = (currency = currentCurrency) =>
   (new Intl.NumberFormat('en', { style: 'currency', currency }).formatToParts(0).find((p) => p.type === 'currency')?.value) ?? currency;
 

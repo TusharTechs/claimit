@@ -6,6 +6,7 @@ import { api, ApiError, type Shop as ShopT } from '../api';
 import { ensureBuyer } from '../buyer';
 import { ItemThumb, Logo, LogoMark, Spinner, useToasts } from '../components/ui';
 import { celebrate } from '../components/ui';
+import { approx } from '../util';
 
 export default function Shop() {
   const { sellerId = '' } = useParams();
@@ -52,6 +53,7 @@ export default function Shop() {
         <p className="mt-1 flex items-center justify-center gap-1.5 text-sm text-muted">
           <ShieldCheck className="size-4 text-mint" /> Fair drops on ClaimIt since {new Date(shop.since).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}
         </p>
+        {shop.avgConfirmSec ? <p className="mt-0.5 text-sm text-muted">Usually confirms payments in {approx(shop.avgConfirmSec)}</p> : null}
         <div className="mt-4 grid grid-cols-3 gap-2">
           {[['Followers', shop.followers], ['Drops', shop.drops.length], ['Orders', shop.orders]].map(([k, v]) => (
             <div key={k as string} className="rounded-2xl bg-card py-3 shadow-[var(--shadow-card)]"><div className="font-display text-2xl font-extrabold">{v}</div><div className="text-xs text-muted">{k}</div></div>

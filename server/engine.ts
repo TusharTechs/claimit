@@ -9,7 +9,7 @@ import { presence } from './presence.ts';
 import {
   MSG, itemKey,
   type ClaimStatus, type DropState, type EventContent, type Item, type ItemState, type ItemStatus,
-  type MyClaim, type OrderContent, type OrderUpdateContent, type Person, type PublicDrop,
+  type MyClaim, type OrderContent, type OrderUpdateContent, type Person, type PublicDrop, type SellerTrust,
 } from '../shared/types.ts';
 
 export const fmtMoney = (n: number, currency = 'INR') =>
@@ -51,8 +51,9 @@ export function itemState(itemId: string): ItemState {
   const item = q.item(itemId)!;
   const active = q.activeClaims(itemId);
   const holder = active.find((c) => c.status === 'holding' || c.status === 'paying')
-    ?? (item.status === 'sold' ? (db.prepare(`SELECT * FROM claims WHERE item_id = ? AND status = 'paid' LIMIT 1`).get(itemId) as ClaimRow | undefined) : undefined);
-  const total = (db.prepare('SELECT COUNT(*) AS n FROM claims WHERE item_id = ?').get(itemId) as { n: number }).n;
+    ?? (item.status === 'sold' ? (db.prepare(`SELECT * FROM claims WHERE item_id = ? AND status = 'paid' ORDER BY paid_at DESC LIMIT 1`).get(itemId) as ClaimRow | undefined) : undefined);
+  // Only this round's claims (an item can be re-dropped after being closed, and the demo re-drops items forever).
+  const total = (db.prepare('SELECT COUNT(*) AS n FROM claims WHERE item_id = ? AND created >= ?').get(itemId, item.dropped_at ?? 0) as { n: number }).n;
   return {
     id: itemId,
     status: item.status,
@@ -62,6 +63,14 @@ export function itemState(itemId: string): ItemState {
     claims: total,
     v: item.version,
   };
+}
+
+/** A seller's public track record: real (non-practice, non-demo) confirmed orders and how fast they confirm payments. */
+export function sellerTrust(sellerId: string): SellerTrust {
+  const r = db.prepare(`SELECT COUNT(*) AS n, AVG(c.paid_at - c.paying_at) AS avg FROM claims c JOIN drops d ON d.id = c.drop_id
+    WHERE d.seller_id = ? AND d.practice = 0 AND c.status = 'paid' AND c.buyer_id NOT LIKE 'bot\\_%' ESCAPE '\\'`).get(sellerId) as { n: number; avg: number | null };
+  const since = (db.prepare('SELECT created FROM sellers WHERE id = ?').get(sellerId) as { created: number } | undefined)?.created ?? now();
+  return { orders: r.n, since, avgConfirmSec: r.avg ? Math.round(r.avg / 1000) : null };
 }
 
 export function publicDrop(dropId: string): PublicDrop {
@@ -75,7 +84,7 @@ export function publicDrop(dropId: string): PublicDrop {
     id: d.id, title: d.title, shop: s.shop, sellerId: sellerUserId(s.id), channelId: d.channel_id,
     status: d.status, liveUrl: d.live_url, holdSeconds: holdSecondsFor(d.id),
     items: items.filter((i) => i.status !== 'draft').map(toItem),
-    state, drop: { status: d.status, current: d.current_item }, demo: d.id === 'demo', currency: s.currency,
+    state, drop: { status: d.status, current: d.current_item }, demo: d.id === 'demo', currency: s.currency, trust: sellerTrust(s.id),
   };
 }
 
@@ -109,11 +118,38 @@ function bump(itemId: string) {
   db.prepare('UPDATE items SET version = version + 1 WHERE id = ?').run(itemId);
 }
 
+/** Metadata writes are idempotent (versioned state), so a failed write is retried with backoff instead of lost. */
+async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
+  for (let i = 0; ; i++) {
+    try { return await fn(); } catch (e) {
+      if (i >= tries - 1) throw e;
+      await new Promise((r) => setTimeout(r, 400 * 2 ** i));
+    }
+  }
+}
+
 function publish(dropId: string, itemIds: string[], extra: Record<string, string> = {}) {
   const d = q.drop(dropId)!;
   const entries: Record<string, string> = { ...extra };
   for (const id of itemIds) entries[itemKey(id)] = JSON.stringify(itemState(id));
-  return enqueue(d.channel_id, () => nexconn.setMetadata(d.channel_id, sellerUserId(d.seller_id), entries));
+  return enqueue(d.channel_id, () => withRetry(() => nexconn.setMetadata(d.channel_id, sellerUserId(d.seller_id), entries)));
+}
+
+/** Boot: republish every live drop's full state, so a write lost in a crash/restart can't leave a room stale. */
+export function republishLive() {
+  const drops = db.prepare(`SELECT id, current_item FROM drops WHERE status = 'live'`).all() as { id: string; current_item: string | null }[];
+  for (const d of drops) {
+    const ids = q.items(d.id).filter((i) => i.status !== 'draft').map((i) => i.id);
+    publish(d.id, ids, { drop: JSON.stringify({ status: 'live', current: d.current_item } satisfies DropState) });
+  }
+  return drops.length;
+}
+
+export const publishItems = (dropId: string, itemIds: string[]) => publish(dropId, itemIds);
+
+/** Let the demo (and anything else) publish extra drop-level state. */
+export function publishDrop(dropId: string, state: DropState) {
+  return publish(dropId, [], { drop: JSON.stringify(state) });
 }
 
 function roomEvent(dropId: string, ev: EventContent) {
@@ -192,7 +228,9 @@ function promoteNext(itemId: string): ClaimRow | null {
   // Presence-aware: pass over people who have left the room, so the item doesn't stall for minutes on a ghost.
   let next: ClaimRow | undefined;
   for (const w of waiting) {
-    if (presence.isOffline(w.buyer_id, 120_000)) { // "away" for 2+ minutes: they've really left
+    // Only skip people gone 10+ minutes: buyers watching the seller's Instagram/TikTok Live have this tab in the background,
+    // which can drop the socket. Everyone else is promoted and gets a push-enabled order DM ("It's your turn").
+    if (presence.isOffline(w.buyer_id, 600_000)) {
       db.prepare(`UPDATE claims SET status = 'expired' WHERE id = ?`).run(w.id);
       skippedOffline.push({ id: w.id, name: w.buyer_name });
       continue;
@@ -273,8 +311,8 @@ export function buyerMarkPaid(claimId: string, buyerId: string, utr: string, shi
   if (!c || c.buyer_id !== buyerId) throw new AppError(404, 'NO_CLAIM', 'Claim not found');
   if (c.status !== 'holding') throw new AppError(409, 'BAD_STATE', 'This claim is no longer on hold');
   tx(() => {
-    db.prepare(`UPDATE claims SET status = 'paying', utr = ?, ship_phone = ?, ship_address = ?, ship_pincode = ? WHERE id = ?`)
-      .run(utr.slice(0, 40), ship.phone, ship.address, ship.pincode, claimId);
+    db.prepare(`UPDATE claims SET status = 'paying', paying_at = ?, utr = ?, ship_phone = ?, ship_address = ?, ship_pincode = ? WHERE id = ?`)
+      .run(now(), utr.slice(0, 40), ship.phone, ship.address, ship.pincode, claimId);
     // Remember delivery details so the next order is one tap.
     db.prepare('UPDATE buyers SET phone = ?, address = ?, pincode = ? WHERE id = ?').run(ship.phone, ship.address, ship.pincode, buyerId);
     db.prepare(`UPDATE items SET status = 'paying' WHERE id = ?`).run(c.item_id);
@@ -347,11 +385,17 @@ export function release(claimId: string, reason: 'expired' | 'cancelled' | 'reje
 export function closeItem(dropId: string, itemId: string) {
   const it = q.item(itemId);
   if (!it || it.drop_id !== dropId) throw new AppError(404, 'NO_ITEM', 'Item not found');
-  const claims = q.activeClaims(itemId);
-  tx(() => {
-    db.prepare(`UPDATE claims SET status = 'cancelled' WHERE item_id = ? AND status IN ('holding','paying','waiting')`).run(itemId);
+  const claims = tx(() => {
+    // Re-read inside the transaction: only an item that's up for grabs or on hold can be pulled. A sold item can't be
+    // re-sold, and an item whose buyer already says they paid must be confirmed or rejected, never silently cancelled.
+    const cur = q.item(itemId)!;
+    if (cur.status === 'paying') throw new AppError(409, 'PAYING', 'The buyer says they paid — confirm or reject the payment first');
+    if (cur.status !== 'live' && cur.status !== 'held') throw new AppError(409, 'BAD_STATE', cur.status === 'sold' ? 'Already sold' : 'Not live');
+    const active = q.activeClaims(itemId);
+    db.prepare(`UPDATE claims SET status = 'cancelled' WHERE item_id = ? AND status IN ('holding','waiting')`).run(itemId);
     db.prepare(`UPDATE items SET status = 'closed' WHERE id = ?`).run(itemId);
     bump(itemId);
+    return active;
   });
   publish(dropId, [itemId]);
   for (const c of claims) sendOrderUpdate(c.id, `${it.name} was taken off the drop.`);
@@ -364,6 +408,47 @@ export function endDrop(dropId: string) {
   roomEvent(dropId, { kind: 'ended', text: 'This drop has ended. Thanks for shopping!' });
 }
 
+/** An order card whose send failed (no message id stored) is sent again once, so a winner is never left without checkout. */
+const resent = new Set<string>();
+function resendLostOrderCards() {
+  const lost = db.prepare(`SELECT id, buyer_id FROM claims WHERE status = 'holding' AND order_msg_id IS NULL AND hold_until > ? AND buyer_id NOT LIKE 'bot\\_%' ESCAPE '\\'`)
+    .all(now() + 30_000) as { id: string; buyer_id: string }[];
+  for (const c of lost) {
+    const at = firstSeenLost.get(c.id) ?? now();
+    firstSeenLost.set(c.id, at);
+    if (now() - at < 10_000 || resent.has(c.id)) continue;
+    resent.add(c.id);
+    sendOrder(c.id);
+  }
+}
+const firstSeenLost = new Map<string, number>();
+
+/** ClaimIt's own system sender for nudges to sellers (s_ prefix = trusted for CI:* messages; real seller ids are 10 chars). */
+export const SYSTEM_USER = 's_claimit';
+
+/**
+ * A buyer said "I've paid" but the seller hasn't confirmed. We never auto-release a claim whose money may have moved —
+ * instead we nudge the seller (5 min, then 15 min) and tell the people waiting that the item is still being confirmed.
+ */
+function remindSlowConfirms() {
+  const slow = db.prepare(`SELECT c.*, i.name AS item_name FROM claims c JOIN items i ON i.id = c.item_id
+    WHERE c.status = 'paying' AND c.paying_at IS NOT NULL AND ((c.reminded = 0 AND c.paying_at < ?) OR (c.reminded = 1 AND c.paying_at < ?))`)
+    .all(now() - 5 * 60_000, now() - 15 * 60_000) as unknown as (ClaimRow & { item_name: string; reminded: number })[];
+  for (const c of slow) {
+    db.prepare('UPDATE claims SET reminded = reminded + 1 WHERE id = ?').run(c.id);
+    if (isBot(c.buyer_id)) continue;
+    const d = q.drop(c.drop_id)!;
+    const mins = c.reminded === 0 ? 5 : 15;
+    const content: OrderUpdateContent = { claimId: c.id, status: 'paying', text: `⏰ ${c.buyer_name} said they paid for ${c.item_name} ${mins} min ago. Check your payments and tap “Payment received” (or Skip) — ${q.activeClaims(c.item_id).filter((x) => x.status === 'waiting').length} people are waiting.` };
+    enqueue(`dm:${SYSTEM_USER}`, () => nexconn.sendDirect(SYSTEM_USER, sellerUserId(d.seller_id), MSG.ORDER_UPDATE, content, content.text));
+    if (c.reminded === 0) {
+      for (const w of q.activeClaims(c.item_id).filter((x) => x.status === 'waiting')) {
+        sendOrderUpdate(w.id, `${c.item_name}: the seller is still confirming ${c.buyer_name}'s payment. You keep your place in line if it falls through.`);
+      }
+    }
+  }
+}
+
 /** Expire holds whose timer ran out. Runs every second. */
 export function startExpiryLoop() {
   setInterval(() => {
@@ -374,6 +459,8 @@ export function startExpiryLoop() {
     // A holder who left 3+ minutes ago and never opened the UPI step isn't coming back: pass the item on (if others wait).
     // Buyers who tapped "Pay with UPI" are expected to be offline (they're in GPay/PhonePe) and keep their full hold.
     const held = db.prepare(`SELECT c.id, c.buyer_id, c.item_id FROM claims c WHERE c.status = 'holding' AND c.pay_opened = 0 AND c.hold_until > ?`).all(now() + 15_000) as { id: string; buyer_id: string; item_id: string }[];
+    remindSlowConfirms();
+    resendLostOrderCards();
     for (const h of held) {
       if (!presence.isOffline(h.buyer_id, 180_000)) continue;
       const others = q.activeClaims(h.item_id).some((x) => x.status === 'waiting');

@@ -36,6 +36,8 @@ export interface ItemState {
 export interface DropState {
   status: 'live' | 'ended';
   current: string | null;
+  /** When the next item drops automatically (demo room), so viewers see a countdown instead of dead air. */
+  nextAt?: number | null;
 }
 
 export interface Item {
@@ -107,7 +109,11 @@ export interface PublicDrop {
   /** The always-on demo room (other buyers are bots). */
   demo?: boolean;
   currency?: string;
+  /** Track record buyers can check before paying a seller directly. */
+  trust?: SellerTrust;
 }
+
+export interface SellerTrust { orders: number; since: number; avgConfirmSec: number | null }
 
 export interface MyClaim {
   id: string;
