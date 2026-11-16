@@ -28,7 +28,8 @@ export default function Admin() {
   const load = useCallback(async () => {
     if (!key) return;
     try {
-      const [payments, reports, revenue] = await Promise.all([call('GET', '/api/admin/payments'), call('GET', '/api/admin/reports'), call('GET', '/api/admin/revenue')]);
+      const [payments, reports] = await Promise.all([call('GET', '/api/admin/payments'), call('GET', '/api/admin/reports')]);
+      const revenue = await call('GET', '/api/admin/revenue').catch(() => undefined); // metrics are optional; the queues aren't
       setData({ payments, reports, revenue }); setErr('');
     }
     catch (e) { setErr(e instanceof Error ? e.message : 'Failed'); setData(null); }

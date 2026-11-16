@@ -62,7 +62,7 @@ async function req<T>(method: string, path: string, body?: unknown, auth?: 'sell
   return json as T;
 }
 
-export interface SellerDropSummary { id: string; title: string; status: string; created: number; items: number; sold: number; startsAt?: number | null }
+export interface SellerDropSummary { id: string; title: string; status: string; created: number; items: number; sold: number; startsAt?: number | null; dropped?: number }
 export interface SellerClaim {
   id: string; itemId: string; buyerId: string; buyerName: string; status: MyClaim['status'];
   seq: number; created: number; holdUntil: number | null; utr: string | null; paidAt: number | null; payingAt?: number | null;

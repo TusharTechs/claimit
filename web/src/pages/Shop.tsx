@@ -63,7 +63,7 @@ export default function Shop() {
           : null}
         {(shop.reportsUnderReview ?? 0) > 0 && <p className="mt-0.5 text-sm text-muted">{shop.reportsUnderReview} buyer report{shop.reportsUnderReview === 1 ? '' : 's'} under review</p>}
         <div className="mt-4 grid grid-cols-3 gap-2">
-          {[['Followers', shop.followers], ['Drops', shop.drops.length], ['Orders', shop.orders]].map(([k, v]) => (
+          {[['Followers', shop.followers], ['Drops', past.length + (live ? 1 : 0) + upcoming.length], ['Orders', shop.orders]].map(([k, v]) => (
             <div key={k as string} className="rounded-2xl bg-card py-3 shadow-[var(--shadow-card)]"><div className="font-display text-2xl font-extrabold">{v}</div><div className="text-xs text-muted">{k}</div></div>
           ))}
         </div>

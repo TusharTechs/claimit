@@ -143,6 +143,8 @@ const nextDropVersion = () => (lastDropVersion = Math.max(lastDropVersion + 1, n
 const pendingWrites = new Map<string, { ids: Set<string>; extra: Record<string, string> }>();
 function publish(dropId: string, itemIds: string[], extra: Record<string, string> = {}) {
   const d = q.drop(dropId)!;
+  // Keys of an ended drop are freed after it settles; late changes are served over REST instead of re-filling metadata.
+  if ((d as { meta_cleared?: number }).meta_cleared) { itemIds = []; if (!Object.keys(extra).length) return Promise.resolve(); }
   const pending = pendingWrites.get(d.channel_id);
   if (pending) { itemIds.forEach((id) => pending.ids.add(id)); Object.assign(pending.extra, extra); return chains.get(d.channel_id); }
   const batch = { ids: new Set(itemIds), extra: { ...extra } };

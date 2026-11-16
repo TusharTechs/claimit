@@ -33,11 +33,12 @@ interface Transport {
 }
 
 const listeners = { msg: new Set<MsgFn>(), meta: new Set<MetaFn>(), count: new Set<CountFn>(), status: new Set<StatusFn>(), msgMeta: new Set<MsgMetaFn>() };
+let linkUp = true; // the transport's own view of the connection (Nexconn connection status / mock stream)
 const emit = {
   msg: (m: RtMessage) => listeners.msg.forEach((f) => f(m)),
   meta: (c: string, ch: { key: string; value: string | null }[]) => listeners.meta.forEach((f) => f(c, ch)),
   count: (c: string, n: number) => listeners.count.forEach((f) => f(c, n)),
-  status: (ok: boolean) => listeners.status.forEach((f) => f(ok)),
+  status: (ok: boolean) => { linkUp = ok; listeners.status.forEach((f) => f(ok)); },
   msgMeta: (id: string, peer: string, md: Record<string, string>) => listeners.msgMeta.forEach((f) => f(id, peer, md)),
 };
 
@@ -117,7 +118,7 @@ async function nexconnTransport(cfg: AppConfig): Promise<Transport> {
     async exitOpen(channelId) { await new OpenChannel(channelId).exitChannel(); },
     async sendOpen(channelId, type, content) {
       const res = await new OpenChannel(channelId).sendMessage(new SendMessageParams(content as Record<string, any>, type));
-      if (!res.isOk) throw new Error(navigator.onLine ? 'NOT_SENT' : 'OFFLINE'); // refused by moderation (pre-message webhook or a native mute) vs. offline
+      if (!res.isOk) throw new Error(linkUp && navigator.onLine ? 'NOT_SENT' : 'OFFLINE'); // refused by moderation (pre-message webhook or a native mute) vs. offline
       return res.data ? toRt(res.data) : null;
     },
     async sendDirect(peerId, type, content) {
@@ -125,7 +126,7 @@ async function nexconnTransport(cfg: AppConfig): Promise<Transport> {
       const res = type === MSG.TEXT
         ? await ch.sendMessage(new SendTextMessageParams({ text: (content as { text: string }).text }))
         : await ch.sendMessage(new SendMessageParams(content as Record<string, any>, type) as any);
-      if (!res.isOk) throw new Error(navigator.onLine ? 'NOT_SENT' : 'OFFLINE'); // moderation refusal vs. no connection
+      if (!res.isOk) throw new Error(linkUp && navigator.onLine ? 'NOT_SENT' : 'OFFLINE'); // moderation refusal vs. no connection
       return res.data ? toRt(res.data) : null;
     },
     async history(peerId) {

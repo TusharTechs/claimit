@@ -44,7 +44,7 @@ export function DMThread({ peerId, peerName, onActivity, compact = false }: {
       if (sent) setMsgs((x) => [...x, sent]);
     } catch (e) {
       setText(t); // keep what they typed
-      toast.error(e instanceof Error && e.message === 'NOT_SENT' ? "This message can't be sent here. Order chats are between you and the shop." : "Couldn't send. Check your connection and try again.");
+      toast.error(e instanceof Error && e.message === 'NOT_SENT' ? "This message can't be sent here. Order chats are between you and the shop." : e instanceof Error && e.message === 'OFFLINE' ? "You're offline. Tap send again once you reconnect." : "Couldn't send. Try again.");
     }
   };
 

@@ -172,11 +172,9 @@ function Drops({ seller, onLogout }: { seller: SellerSession; onLogout: () => vo
               <Link to={`/sell/${d.id}`} className="flex min-w-0 flex-1 items-center justify-between gap-2 px-4 py-3">
                 <div className="min-w-0">
                   <div className="truncate font-semibold">{d.title}</div>
-                  <div className="text-sm text-muted">{d.items} items · {d.sold} sold · {new Date(d.created).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</div>
+                  <div className="text-sm text-muted">{d.items} item{d.items === 1 ? '' : 's'} · {d.sold} sold · {new Date(d.created).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</div>
                 </div>
-                {d.status === 'live' && d.startsAt && d.startsAt > Date.now()
-                  ? <span className="whitespace-nowrap rounded-full bg-sun-soft px-2.5 py-1 text-xs font-bold text-[#6b4600]">SOON · {new Date(d.startsAt).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</span>
-                  : <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${d.status === 'live' ? 'bg-hot-dark text-white' : 'bg-line text-ink-2'}`}>{d.status === 'live' ? 'LIVE' : 'ENDED'}</span>}
+                <DropChip d={d} />
               </Link>
               {d.status === 'ended' && d.items > d.sold && (
                 <button className="btn shrink-0 bg-paper px-3 py-2 text-sm" title="New drop with the unsold items" disabled={again === d.id} onClick={async () => {
@@ -207,6 +205,7 @@ function ProTeam({ shop, onAccount }: { shop: string; onAccount?: (a: SellerAcco
   const [invite, setInvite] = useState<{ name: string; link: string } | null>(null);
   const [removing, setRemoving] = useState<Cohost | null>(null);
   const [payOpen, setPayOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false); // a payment came back but its webhook hasn't landed yet
   const [busy, setBusy] = useState(false);
   // ?pro=pay opens checkout straight away (from Pricing). ?pro=return is the way back from Dodo's checkout:
   // read its status, and on success wait for the payment webhook to switch Pro on (usually seconds).
@@ -219,27 +218,32 @@ function ProTeam({ shop, onAccount }: { shop: string; onAccount?: (a: SellerAcco
     if (mode !== 'return') return;
     const status = (sp.get('status') || '').toLowerCase();
     if (['failed', 'cancelled', 'canceled', 'requires_payment_method'].includes(status)) {
+      try { localStorage.removeItem('claimit.checkout'); } catch { /* ignore */ }
       toast.error('The payment didn\'t go through, so nothing was charged. You can try again.');
       setPayOpen(true);
       return;
     }
-    toast('Payment received — switching on Pro…');
-    let saved: { until: number; paidBefore: boolean } = { until: 0, paidBefore: false };
+    const tid = toast.loading(status === 'processing' ? 'Your payment is processing (UPI and bank payments can take a minute)…' : 'Confirming your payment…');
+    let saved: { until: number | null; paidBefore: boolean } = { until: null, paidBefore: false };
     try { saved = { ...saved, ...JSON.parse(localStorage.getItem('claimit.checkout') || '{}') }; } catch { /* ignore */ }
     let n = 0;
+    let baseline: number | null = saved.until; // paid on another device? use Pro's end date as it is right now
     const t = setInterval(async () => {
+      if (baseline === null) { try { baseline = (await api.sellerSession()).proUntil ?? 0; } catch { return; } }
+      saved.until = baseline;
       try {
         const a = await api.sellerSession();
         // Done only when this payment's days have been added (the until date moved past where it stood at checkout).
-        if (a.pro && a.paidPro && (a.proUntil ?? 0) > saved.until + 86_400_000) {
+        if (a.pro && a.paidPro && (a.proUntil ?? 0) > (saved.until ?? 0) + 86_400_000) {
           clearInterval(t);
           try { localStorage.removeItem('claimit.checkout'); } catch { /* ignore */ }
           const until = new Date(a.proUntil!).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-          toast.success(saved.paidBefore ? `Renewed: Pro now runs until ${until}.` : saved.until > Date.now() ? `Paid: 30 days added after your trial. Pro runs until ${until}.` : `Pro is on until ${until}.`);
+          toast.success(saved.paidBefore ? `Renewed: Pro now runs until ${until}.` : (saved.until ?? 0) > Date.now() ? `Paid: 30 days added after your trial. Pro runs until ${until}.` : `Pro is on until ${until}.`, { id: tid });
+          setConfirming(false);
           load();
         }
       } catch { /* retry */ }
-      if (++n > 20) { clearInterval(t); toast("Still confirming your payment. Pro will switch on as soon as it does."); }
+      if (++n > 20) { clearInterval(t); setConfirming(true); toast("Still confirming your payment. Pro will switch on as soon as it does.", { id: tid }); }
     }, 2000);
     return () => clearInterval(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -276,6 +280,7 @@ function ProTeam({ shop, onAccount }: { shop: string; onAccount?: (a: SellerAcco
               setBusy(true);
               try { await api.proTrial(); toast.success(`Pro trial started: ${trialDays} days free`); await load(); } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not start the trial'); } finally { setBusy(false); }
             }}>{busy ? <Spinner /> : `Start ${trialDays}-day free trial`}</button>}
+        {confirming && <div className="w-full rounded-xl bg-white/10 px-3 py-2 text-sm">⏳ Confirming your payment. Pro switches on by itself as soon as it's confirmed; no need to pay again.</div>}
         {!acct.trialUsed && <button className="w-full text-center text-sm font-semibold text-white underline sm:w-auto sm:self-center" onClick={() => setPayOpen(true)}>or pay now · {money(acct.proPrice ?? 9, 'USD')}/mo</button>}
       </section></>
     );
@@ -436,4 +441,22 @@ function ProPaySheet({ open, onClose, paidBefore }: { open: boolean; onClose: ()
       )}
     </Sheet>
   );
+}
+
+/** One status per drop, the same way buyers see it: SOON (scheduled, nothing dropped), STARTING (opened, nothing dropped
+ *  yet), LIVE (items are being dropped) or ENDED. Re-renders at the scheduled start so SOON flips on time. */
+function DropChip({ d }: { d: SellerDropSummary }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!d.startsAt || d.startsAt <= Date.now()) return;
+    const t = setTimeout(() => tick((n) => n + 1), d.startsAt - Date.now() + 500);
+    return () => clearTimeout(t);
+  }, [d.startsAt]);
+  const base = 'whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-bold';
+  if (d.status !== 'live') return <span className={`${base} bg-line text-ink-2`}>ENDED</span>;
+  if ((d.dropped ?? 0) > 0) return <span className={`${base} bg-hot-dark text-white`}>LIVE</span>;
+  if (d.startsAt && d.startsAt > Date.now()) {
+    return <span className={`${base} bg-sun-soft text-[#6b4600]`}>SOON · {new Date(d.startsAt).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</span>;
+  }
+  return <span className={`${base} bg-sun-soft text-[#6b4600]`}>STARTING SOON</span>;
 }

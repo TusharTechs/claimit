@@ -30,6 +30,8 @@ Millions of social sellers run live sales on Instagram, TikTok, Facebook, YouTub
 
 The **claim arbiter** runs on the app server. Every state change is a single synchronous SQLite transaction in one Node process, so two buyers who tap in the same millisecond can never both win. After each commit, the server publishes the new queue to the open channel's metadata, sends a priority event to the room, and sends or updates the winner's order card.
 
+Billing has its own proof: `npm run test:billing` (with `DODO_WEBHOOK_SECRET` set to the server's) sends signed Dodo webhooks and checks the Pro time a shop ends up with across partial payments, duplicate deliveries, partial refunds, disputes and won disputes, and unknown currencies.
+
 Prove it: with the mock server running, `npm run test:race` fires 200 simultaneous claims at one item and checks for exactly one winner, a gap-free waitlist in tap order, a public state that matches what each buyer was told, and correct promotion when the winner lets go. It also checks that a paid or sold item can't be pulled or dropped again, that a racing confirm and reject resolve to exactly one decision, and that "Run again" never copies an item someone is still holding.
 
 **Reliability details:**
@@ -73,7 +75,7 @@ The full Business Model Canvas, unit economics and impact are in the app at `/bu
 
 1. In the Dodo dashboard, switch to **Test mode**. Create a one-time product, "ClaimIt Pro (30 days)", at $9. Optionally create a second at $4.50 for founding sellers.
 2. Copy each product's payment link, for example `https://test.checkout.dodopayments.com/buy/pdt_…`.
-3. Add a webhook endpoint `https://<your-host>/api/dodo/webhook` for `payment.succeeded`, `refund.succeeded`, `dispute.opened` and `dispute.won`, and copy its signing secret (`whsec_…`).
+3. Add a webhook endpoint `https://<your-host>/api/dodo/webhook` for `payment.succeeded`, `refund.succeeded`, `dispute.opened`, `dispute.won` and `dispute.cancelled`, and copy its signing secret (`whsec_…`).
 4. In `.env`, set `DODO_PRO_LINK`, `DODO_PRO_LINK_FOUNDING` (optional) and `DODO_WEBHOOK_SECRET`, then deploy.
 
 ClaimIt adds the shop's id to the checkout link (`metadata_sellerId`). When Dodo's signed webhook arrives, ClaimIt verifies it (Standard Webhooks HMAC with a 5-minute window) and adds 30 days of Pro. Repeat deliveries of the same payment don't add time twice. In test mode, pay with card `4242 4242 4242 4242`, expiry 06/32, CVV 123: no real money moves. To go live, swap in the live links and secret.

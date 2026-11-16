@@ -203,10 +203,10 @@ export default function SellerConsole() {
           💸 {needsAction} payment{needsAction > 1 ? 's' : ''} to confirm →
         </button>
       )}
-      {drop.startsAt && drop.startsAt > Date.now() && !ended && (
+      {upcoming && !ended && (
         <div className="mx-auto mt-3 max-w-6xl px-4">
           <div className="rounded-2xl bg-sun-soft px-4 py-2.5 text-sm text-[#6b4600]">
-            📅 <b>Scheduled for {new Date(drop.startsAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}.</b> Buyers see a countdown and can add it to their calendar. Dropping an item starts it early.
+            📅 <b>Scheduled for {new Date(drop.startsAt!).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}.</b> Buyers see a countdown and can add it to their calendar. Dropping an item starts it early.
           </div>
         </div>
       )}

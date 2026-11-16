@@ -672,7 +672,7 @@ function ChatInput({ onSend, disabled, ended }: { onSend: (t: string) => Promise
     <form className="flex gap-2" onSubmit={async (e) => { e.preventDefault(); const t = text.trim(); if (!t) return; setText(''); await onSend(t).catch((err) => {
       // Moderation refused it (repeated payment details pause your chat in this room, Nexconn native mute) vs. a network issue.
       if (err instanceof Error && err.message === 'NOT_SENT') toast("Your message wasn't sent. Sharing payment details or phone numbers in the room pauses your chat here for a while.", { duration: 6000 });
-      else toast.error("Couldn't send. Check your connection and try again.");
+      else toast.error(err instanceof Error && err.message === 'OFFLINE' ? "You're offline. Your message will be here when you reconnect; tap send again." : "Couldn't send. Try again.");
       setText(t);
     }); }}>
       <label className="sr-only" htmlFor="room-chat">Message the room</label>

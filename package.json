@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit -p .",
     "seed:demo": "tsx scripts/demo-seed.ts",
     "test:race": "tsx scripts/race.ts",
+    "test:billing": "tsx scripts/billing.ts",
     "dev:mock": "NEXCONN_APP_KEY= NEXCONN_APP_SECRET= DATA_DIR=./data-mock npm run dev"
   },
   "engines": {
