@@ -27,7 +27,7 @@ COPYFILE_DISABLE=1 tar --no-xattrs -czf "$TMP/claimit.tgz" package.json package-
 # Runtime env file (secrets stay out of the tarball and the repo)
 grep -E '^NEXCONN_(APP_KEY|APP_SECRET|AREA)=' .env > "$TMP/claimit.env"
 { echo "PORT=8787"; echo "DATA_DIR=/var/lib/claimit"; echo "PUBLIC_URL=https://$HOST"; } >> "$TMP/claimit.env"
-grep -E '^(HOLD_SECONDS|MAX_WAITLIST|ADMIN_KEY|PRO_PAY_LINK|PRO_PAY_NOTE)=' .env >> "$TMP/claimit.env" || true
+grep -E '^(HOLD_SECONDS|MAX_WAITLIST|ADMIN_KEY|PRO_PAY_LINK|PRO_PAY_NOTE|DODO_PRO_LINK|DODO_PRO_LINK_FOUNDING|DODO_WEBHOOK_SECRET)=' .env >> "$TMP/claimit.env" || true
 
 echo "› uploading"
 "${SCP[@]}" "$TMP/claimit.tgz" "$TMP/claimit.env" "$VM":/tmp/

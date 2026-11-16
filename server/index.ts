@@ -17,7 +17,8 @@ import type { AppConfig } from '../shared/types.ts';
 
 const app = express();
 app.set('trust proxy', 'loopback'); // behind Caddy on the same host
-app.use(express.json({ limit: '3mb' }));
+// Keep the raw bytes too: payment webhooks are signed over the exact body.
+app.use(express.json({ limit: '3mb', verify: (req, _res, buf) => { (req as Request & { rawBody?: Buffer }).rawBody = buf; } }));
 
 // Tiny fixed-window rate limiter (single process). Lenient: campus Wi-Fi puts many buyers behind one IP.
 const hits = new Map<string, { n: number; reset: number }>();
@@ -188,12 +189,71 @@ app.post('/api/seller/pro/trial', h((req) => {
  * The same pro_until check gates every Pro feature, so a processor webhook can replace the admin step without other changes.
  */
 const proBilling = () => ({ link: process.env.PRO_PAY_LINK || null, note: process.env.PRO_PAY_NOTE || null });
+
+/**
+ * Dodo Payments (merchant of record): a static checkout link per Pro price, tagged with the shop id. Dodo's signed
+ * webhook (payment.succeeded) switches Pro on automatically: no operator step. In test mode
+ * (test.checkout.dodopayments.com + test cards) no real money moves.
+ */
+const dodo = () => ({
+  link: process.env.DODO_PRO_LINK || null,
+  foundingLink: process.env.DODO_PRO_LINK_FOUNDING || null,
+  secret: process.env.DODO_WEBHOOK_SECRET || null,
+  test: /test\./.test(process.env.DODO_PRO_LINK || ''),
+});
+function dodoCheckout(req: Request, s: SellerAuth) {
+  const d = dodo();
+  const base = (s.founding && d.foundingLink) || d.link;
+  if (!base || !d.secret) return null;
+  const site = config.publicUrl || `${req.protocol}://${req.get('host')}`;
+  const u = new URL(base);
+  u.searchParams.set('quantity', '1');
+  u.searchParams.set('redirect_url', `${site}/sell?pro=return`);
+  u.searchParams.set('metadata_sellerId', s.id);
+  u.searchParams.set('metadata_kind', 'claimit_pro');
+  return u.toString();
+}
+
 app.get('/api/seller/pro/billing', h((req) => {
   const s = ownerOnly(req);
   const b = proBilling();
+  const checkout = dodoCheckout(req, s);
   const pending = db.prepare(`SELECT id, amount, ref, created FROM pro_payments WHERE seller_id = ? AND status = 'pending' ORDER BY created DESC LIMIT 1`).get(s.id) ?? null;
-  return { available: !!(b.link || b.note), link: b.link, note: b.note, price: s.founding ? 4.5 : 9, pending, proUntil: s.pro_until };
+  return { available: !!(checkout || b.link || b.note), checkout, testMode: !!checkout && dodo().test, link: b.link, note: b.note,
+    price: s.founding ? 4.5 : 9, pending, proUntil: s.pro_until };
 }));
+
+/** Dodo webhook (Standard Webhooks signing): verify, then add 30 days of Pro for the shop in the payment's metadata. */
+app.post('/api/dodo/webhook', (req, res) => {
+  const secret = dodo().secret;
+  const raw = (req as Request & { rawBody?: Buffer }).rawBody;
+  const id = req.header('webhook-id') || '', ts = req.header('webhook-timestamp') || '', sigs = req.header('webhook-signature') || '';
+  if (!secret || !raw || !id || !ts) return res.status(401).json({ ok: false });
+  if (Math.abs(Date.now() / 1000 - Number(ts)) > 300) return res.status(401).json({ ok: false, error: 'stale' });
+  const key = Buffer.from(secret.replace(/^whsec_/, ''), 'base64');
+  const expected = crypto.createHmac('sha256', key).update(`${id}.${ts}.${raw.toString('utf8')}`).digest();
+  const ok = sigs.split(' ').some((part) => {
+    const [ver, sig] = part.split(',');
+    const got = Buffer.from(sig || '', 'base64');
+    return ver === 'v1' && got.length === expected.length && crypto.timingSafeEqual(got, expected);
+  });
+  if (!ok) return res.status(401).json({ ok: false, error: 'bad_signature' });
+
+  const ev = req.body as { type?: string; data?: { payment_id?: string; total_amount?: number; metadata?: Record<string, string> } };
+  const sellerId = ev.data?.metadata?.sellerId;
+  if (ev.type === 'payment.succeeded' && sellerId && ev.data?.metadata?.kind === 'claimit_pro' && q.seller(sellerId)) {
+    const payId = String(ev.data.payment_id || id);
+    tx(() => {
+      // Idempotent: Dodo may deliver the same event more than once.
+      if (db.prepare('SELECT 1 FROM pro_payments WHERE id = ?').get(payId)) return;
+      db.prepare(`INSERT INTO pro_payments (id, seller_id, amount, ref, status, created, decided) VALUES (?, ?, ?, ?, 'confirmed', ?, ?)`)
+        .run(payId, sellerId, (ev.data!.total_amount ?? 0) / 100, `dodo${dodo().test ? ' (test)' : ''} ${payId}`, now(), now());
+      const cur = (db.prepare('SELECT pro_until FROM sellers WHERE id = ?').get(sellerId) as { pro_until: number | null }).pro_until ?? 0;
+      db.prepare('UPDATE sellers SET pro_until = ? WHERE id = ?').run(Math.max(now(), cur) + 30 * 86_400_000, sellerId);
+    });
+  }
+  res.json({ ok: true });
+});
 app.post('/api/seller/pro/pay', limit('propay', 10, 60 * 60_000), h((req) => {
   const s = ownerOnly(req);
   if (!proBilling().link && !proBilling().note) throw new AppError(409, 'NO_BILLING', 'Pro billing opens soon');

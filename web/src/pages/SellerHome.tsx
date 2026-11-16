@@ -208,6 +208,19 @@ function ProTeam({ shop }: { shop: string }) {
   const [removing, setRemoving] = useState<Cohost | null>(null);
   const [payOpen, setPayOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Back from checkout (?pro=return): Pro turns on when the payment webhook lands, usually within seconds.
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get('pro') !== 'return') return;
+    history.replaceState(null, '', location.pathname);
+    toast('Payment received — switching on Pro…');
+    let n = 0;
+    const t = setInterval(async () => {
+      try { const a = await api.sellerSession(); if (a.pro) { clearInterval(t); setAcct(a); toast.success('Pro is on. Add your first co-host below.'); load(); } } catch { /* retry */ }
+      if (++n > 20) { clearInterval(t); toast("Still confirming your payment. Pro will switch on as soon as it does."); }
+    }, 2000);
+    return () => clearInterval(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const load = async () => {
     try {
       const a = await api.sellerSession();
@@ -365,6 +378,17 @@ function ProPaySheet({ open, onClose }: { open: boolean; onClose: () => void }) 
         <div className="pb-4"><p className="text-ink-2">Couldn't load payment details.</p><button className="btn mt-3 bg-ink px-5 py-2.5 text-white" onClick={loadBilling}>Try again</button></div>
       ) : !b ? <Spinner className="my-6 size-6 text-hot" /> : !b.available ? (
         <p className="pb-4 text-ink-2">Paid Pro opens soon. You'll keep every feature of Free in the meantime.</p>
+      ) : b.checkout ? (
+        <div className="space-y-3 pb-4">
+          <p className="text-ink-2"><b className="text-ink">{money(b.price, 'USD')} for 30 days</b> of Pro. Pro switches on automatically after payment. Renewals add 30 days, and if you don't renew you're simply back on Free.</p>
+          {b.testMode && (
+            <div className="rounded-xl bg-sun-soft p-3 text-sm text-[#6b4600]">
+              <b>Test mode: no real money moves.</b> Pay with card <span className="font-mono">4242 4242 4242 4242</span>, expiry 06/32, CVV 123 (India: <span className="font-mono">4576 2389 1277 1450</span>, or UPI <span className="font-mono">success@upi</span>).
+            </div>
+          )}
+          <a className="btn w-full bg-mint py-3 text-white" href={b.checkout}>Pay {money(b.price, 'USD')} securely ↗</a>
+          <p className="text-center text-xs text-muted">Checkout by Dodo Payments. ClaimIt never sees your card.</p>
+        </div>
       ) : b.pending ? (
         <div className="pb-4"><p className="font-semibold">Thanks! We're confirming your payment (ref {b.pending.ref}).</p><p className="mt-1 text-sm text-muted">Pro turns on as soon as it's confirmed, usually within a day.</p></div>
       ) : (

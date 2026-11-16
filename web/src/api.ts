@@ -94,7 +94,7 @@ export const api = {
     req<SellerSession & { userId: string; token: string }>('POST', '/api/sellers', b),
   sellerSession: () => req<SellerSession & SellerAccount & { userId: string; token: string }>('POST', '/api/seller/session', {}, 'seller'),
   reportShop: (sellerId: string, reason: string, text: string) => req('POST', `/api/shops/${sellerId}/report`, { reason, text }, 'buyer'),
-  proBilling: () => req<{ available: boolean; link: string | null; note: string | null; price: number; pending: { id: string; amount: number; ref: string; created: number } | null; proUntil: number | null }>('GET', '/api/seller/pro/billing', undefined, 'seller'),
+  proBilling: () => req<{ available: boolean; checkout?: string | null; testMode?: boolean; link: string | null; note: string | null; price: number; pending: { id: string; amount: number; ref: string; created: number } | null; proUntil: number | null }>('GET', '/api/seller/pro/billing', undefined, 'seller'),
   proPay: (ref: string) => req<{ id: string; status: string }>('POST', '/api/seller/pro/pay', { ref }, 'seller'),
   insights: () => req<Insights>('GET', '/api/seller/insights', undefined, 'seller'),
   proTrial: () => req<{ pro: boolean; proUntil: number }>('POST', '/api/seller/pro/trial', {}, 'seller'),
