@@ -26,6 +26,9 @@ function contentOf<T>(m: any): T {
   return (c || {}) as T;
 }
 
+/** Status updates that arrived while a card was not on screen (the inbox was closed), applied when the card mounts. */
+const lateMeta = new Map<string, Record<string, string>>();
+
 /** Order card bubble, rendered by Chat UI as <nc-c-claimit-order>. */
 class OrderBubble extends HTMLElement {
   /** Mounted bubbles by message id, so metadata updates re-render them even if Chat UI doesn't. */
@@ -48,6 +51,8 @@ class OrderBubble extends HTMLElement {
     if (!id) return;
     if (this._id && this._id !== id) OrderBubble.live.get(this._id)?.delete(this);
     this._id = id;
+    const late = lateMeta.get(id);
+    if (late) this._md = { ...this._md, ...late };
     if (!OrderBubble.live.has(id)) OrderBubble.live.set(id, new Set());
     OrderBubble.live.get(id)!.add(this);
   }
@@ -146,7 +151,10 @@ export async function setupChatUI(selfId: string, selfName: string) {
   const en = created.cloneLanguageEntries('en_US');
   if (en) created.registerLanguagePack('en_US', { ...en, 'input.placeholder': 'Reply to your buyer… (Enter to send)' });
   created.ready();
-  rt.onMessageMeta((messageId, _peer, md) => OrderBubble.live.get(messageId)?.forEach((el) => el.applyMeta(md)));
+  rt.onMessageMeta((messageId, _peer, md) => {
+    lateMeta.set(messageId, { ...lateMeta.get(messageId), ...md });
+    OrderBubble.live.get(messageId)?.forEach((el) => el.applyMeta(md));
+  });
   app = created;
   return app;
 }
