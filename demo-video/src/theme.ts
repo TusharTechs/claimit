@@ -12,6 +12,6 @@ export const C = {
   hot: '#ff4a1c', hotDark: '#d93a10', hotSoft: '#ffe6dc', sun: '#ffb400', sunSoft: '#fff1cc',
   mint: '#0b8457', mintSoft: '#dbf5e9', plum: '#2b1838',
 };
-export const FPS = 30;
+export { FPS } from './timeline';
 export const W = 1920;
 export const H = 1080;

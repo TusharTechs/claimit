@@ -3,17 +3,12 @@ import { AbsoluteFill, Audio, Img, Sequence, Series, interpolate, spring, static
 import { C, FPS, display, mono, sans } from './theme';
 import { M, actorOf, data, has } from './data';
 import { Backdrop, Browser, Captions, Heading, Logo, NexTag, Phone, Pop, Rise, Speed, Terminal, Wire, parts, srcAt, wireRows, type Part } from './components';
+import { COLD, LAPSE, PROOF, REPLY, SCAM, TIMES, TITLE, TOTAL, VO_AT, checkoutPs, claimPs, hookSeen, inboxSeen, joinPs, proAdminAt, proHasDodo, proPs, promotePs, racePs, raceStamp, raceTap, recapPs, replyPs, scamPs, setupPs } from './timeline';
+import { SOUNDS, musicVolume } from './sounds';
 
 const HOST = '35-224-27-222.sslip.io';
 const TINT: Record<string, string> = { buyer1: '#ff4a1c', buyer2: '#2f6fed', buyer3: '#b4531f', buyer4: '#6b6259', seller: '#0b8457' };
 const nameOf = (a: string) => data.names[a] ?? a;
-const frames = (id: string, pad = 0.9) => Math.ceil(((data.vo[id] ?? 4) + pad) * FPS);
-const VO_AT = 7;
-
-const hookSeen = data.activity.some((e) => e.dir === 'webhook' && /pre_messaging/.test(e.what));
-const inboxSeen = has('inbox_open') && has('inbox_seen');
-const SCAM = hookSeen ? 'scam_hook' : 'scam_mask';
-const REPLY = inboxSeen ? 'reply' : 'reply_noinbox';
 const race = data.facts.race ?? { winner: 'Priya', first: 'Leo', second: 'Mei', winners: 1 };
 const aWinner = actorOf(race.winner), aFirst = actorOf(race.first), aSecond = actorOf(race.second);
 
@@ -46,9 +41,9 @@ const WHO = ['priya.k', 'leo_thrifts', 'mei.w', 'sana', 'jo.b', 'ana_r', 'dev', 
 const ColdOpen: React.FC = () => {
   const f = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const flood = 128; // "Then forty people comment in the same second"
+  const flood = COLD.flood; // "Then forty people comment in the same second"
   const n = Math.max(0, Math.min(40, Math.floor((f - flood) * 1.1)));
-  const ask = spring({ frame: f - 212, fps, config: { damping: 14 } });
+  const ask = spring({ frame: f - COLD.ask, fps, config: { damping: 14 } });
   const shake = f > flood && f < flood + 50 ? Math.sin(f * 2.1) * 3 : 0;
   return (
     <Scene vo="cold" logo={false}>
@@ -90,7 +85,7 @@ const Title: React.FC = () => {
   const f = useCurrentFrame();
   const { fps } = useVideoConfig();
   const s = spring({ frame: f - 4, fps, config: { damping: 13 } });
-  const beats = [['One link.', 44], ['One tap.', 64], ['One winner.', 84]] as const;
+  const beats = [['One link.', TITLE.beats[0]!], ['One tap.', TITLE.beats[1]!], ['One winner.', TITLE.beats[2]!]] as const;
   return (
     <Scene vo="title" logo={false}>
       <AbsoluteFill style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 34, paddingBottom: 80 }}>
@@ -101,7 +96,7 @@ const Title: React.FC = () => {
         <div style={{ display: 'flex', gap: 26, fontFamily: display, fontWeight: 700, fontSize: 64, letterSpacing: -1.5, color: C.ink }}>
           {beats.map(([t, at], i) => <Pop key={t} delay={at}><span style={{ color: i === 2 ? C.hot : C.ink }}>{t}</span></Pop>)}
         </div>
-        <Rise delay={104}>
+        <Rise delay={TITLE.chips}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 }}>
             <span style={{ fontFamily: sans, fontWeight: 600, fontSize: 24, color: C.muted, marginRight: 6 }}>Built on Nexconn</span>
             {['Chat SDK', 'Chat UI kit', 'Platform API', 'Webhooks'].map((t) => <span key={t} style={{ padding: '9px 16px', borderRadius: 12, background: C.plum, color: '#fff', fontFamily: mono, fontSize: 19 }}>{t}</span>)}
@@ -114,7 +109,7 @@ const Title: React.FC = () => {
 
 // ---------- 3. seller sets up ----------
 const Setup: React.FC<{ F: number }> = ({ F }) => {
-  const ps = parts(F, [{ a: M('onboard_start', -300), b: M('items_ready', 1400) }]);
+  const ps = setupPs(F);
   return (
     <Scene vo="setup" ps={ps} top={<NexTag kit="PLATFORM API" what="one open channel per drop" delay={Math.round(F * 0.45)} />}>
       <Row><Browser actor="seller" ps={ps} w={1236} url={`${HOST}/sell`} /></Row>
@@ -124,7 +119,7 @@ const Setup: React.FC<{ F: number }> = ({ F }) => {
 
 // ---------- 4. buyers join ----------
 const Join: React.FC<{ F: number }> = ({ F }) => {
-  const ps = parts(F, [{ a: Math.max(M('items_ready', 400), M('buyers_in', -7000)), b: M('drop1', -250) }]);
+  const ps = joinPs(F);
   const now = srcAt(ps, useCurrentFrame());
   return (
     <Scene vo="join" ps={ps} top={<NexTag kit="CHAT SDK" what="OpenChannel.enterChannel()" delay={20} />}>
@@ -141,7 +136,7 @@ const Join: React.FC<{ F: number }> = ({ F }) => {
 
 // ---------- 5. first claim + queue ----------
 const Claim: React.FC<{ F: number }> = ({ F }) => {
-  const ps = parts(F, [{ a: M('drop1', -300), b: M('queue1_visible', 2000) }]);
+  const ps = claimPs(F);
   const now = srcAt(ps, useCurrentFrame());
   return (
     <Scene vo="claim" ps={ps}>
@@ -158,7 +153,7 @@ const Claim: React.FC<{ F: number }> = ({ F }) => {
 
 // ---------- 6. checkout + live order card ----------
 const Checkout: React.FC<{ F: number }> = ({ F }) => {
-  const ps = parts(F, [{ a: M('checkout1', -300), b: M('sold1', 1300), w: 3 }, { a: M('orderchat1', -150), b: M('orderchat1', 3700), w: 1.15 }]);
+  const ps = checkoutPs(F);
   return (
     <Scene vo="checkout" ps={ps} top={<NexTag kit="DIRECT CHANNEL" what="message metadata → the order card updates in place" delay={ps[1]!.from - 40} />}>
       <Row gap={44}>
@@ -173,14 +168,10 @@ const Checkout: React.FC<{ F: number }> = ({ F }) => {
 const Race: React.FC<{ F: number }> = ({ F }) => {
   const f = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const ps = parts(F, [
-    { a: M('drop2_seen', -200), b: M('race', -120), frames: 62 },
-    { a: M('race', -120), b: M('race_done', 500), frames: Math.round((((M('race_done', 500) - M('race', -120)) / 1000) * FPS) / 0.4) },
-    { a: M('race_done', 500), b: M('race_done', 500) + 4300 },
-  ]);
+  const ps = racePs(F);
   const now = srcAt(ps, f);
   const done = now >= M('race_done', -150);
-  const tapF = ps[1]!.from + Math.round(((120 / 1000) * FPS) / 0.4);
+  const tapF = raceTap(ps);
   const flash = interpolate(f, [tapF - 1, tapF + 2, tapF + 14], [0, 0.5, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
   const taps = race.taps ?? {};
   const badge = (a: string) => {
@@ -188,7 +179,7 @@ const Race: React.FC<{ F: number }> = ({ F }) => {
     const [txt, bg, fg] = a === aWinner ? ['WINNER', C.mint, '#fff'] : a === aFirst ? ['#1 in line', C.sun, C.ink] : ['#2 in line', C.sunSoft, C.ink];
     return <Pop><span style={{ padding: '7px 14px', borderRadius: 999, background: bg, color: fg, fontFamily: sans, fontWeight: 800, fontSize: 18 }}>{txt}</span></Pop>;
   };
-  const stamp = spring({ frame: f - (ps[2]!.from + 6), fps, config: { damping: 11 } });
+  const stamp = spring({ frame: f - raceStamp(ps), fps, config: { damping: 11 } });
   return (
     <Scene vo="race" ps={ps}>
       <Row gap={40}>
@@ -219,7 +210,7 @@ const Race: React.FC<{ F: number }> = ({ F }) => {
 
 // ---------- 8. scammer in the room ----------
 const Scam: React.FC<{ F: number }> = ({ F }) => {
-  const ps = parts(F, [{ a: M('scam_start', -500), b: M('scam_end', 2200) }]);
+  const ps = scamPs(F);
   const now = srcAt(ps, useCurrentFrame());
   const rows = wireRows(ps[0]!.a, ps[0]!.b, { sdk: /OpenChannel\.sendMessage|onMessageReceived/, type: /CI:Chat/, api: /mute|ban|expire/, hooks: /pre_messaging/ });
   return (
@@ -238,9 +229,7 @@ const Scam: React.FC<{ F: number }> = ({ F }) => {
 
 // ---------- 9. seller replies (+ Chat UI kit inbox) ----------
 const Reply: React.FC<{ F: number }> = ({ F }) => {
-  const defs = [{ a: M('seller_room', -200), b: M('seller_reply', 2300), w: 1 }];
-  if (inboxSeen) defs.push({ a: M('inbox_open', -400), b: M('inbox_seen', 200), w: 1.4 });
-  const ps = parts(F, defs);
+  const ps = replyPs(F);
   return (
     <Scene vo={REPLY} ps={ps} top={<>
       <NexTag kit="CHAT SDK" what="priority message type CI:SellerChat" delay={14} />
@@ -256,8 +245,8 @@ const Reply: React.FC<{ F: number }> = ({ F }) => {
 
 // ---------- 10. the winner never pays ----------
 const Promote: React.FC<{ F: number }> = ({ F }) => {
-  const lapse = 70;
-  const ps = parts(F, [{ a: M('waiting_expiry', 500), b: M('promoted', -900), frames: lapse }, { a: M('promoted', -900), b: M('promoted', -900) + ((F - lapse) / FPS) * 1000 }]);
+  const lapse = LAPSE;
+  const ps = promotePs(F);
   return (
     <Scene vo="promote" ps={ps}>
       <Row gap={40}>
@@ -274,22 +263,15 @@ const Promote: React.FC<{ F: number }> = ({ F }) => {
 
 // ---------- 11. recap ----------
 const Recap: React.FC<{ F: number }> = ({ F }) => {
-  const ps = parts(F, [{ a: M('recap', -300), b: M('recap', -300) + (F / FPS) * 1000 }]);
+  const ps = recapPs(F);
   return <Scene vo="recap" ps={ps}><Row><Browser actor="seller" ps={ps} w={1236} url={`${HOST}/sell`} /></Row></Scene>;
 };
 
 // ---------- 12. Pro + checkout ----------
 const Pro: React.FC<{ F: number }> = ({ F }) => {
-  const dodo = has('dodo_checkout');
-  const cuts = [
-    { a: M('pro_card', -200), b: M('cohost_added', 2600), w: 3 },
-    { a: M('scheduled_console', -300), b: M('scheduled_buyer', 3600), w: 2.8 },
-    { a: M('pay_sheet', -200), b: M('pay_sheet', 2600), w: 2 },
-    ...(dodo ? [{ a: M('dodo_checkout', 300), b: M('dodo_checkout', 4600), w: 2.4 }] : []),
-    ...(has('admin_full') ? [{ a: M('admin_full', 500), b: M('admin_full', 3700), w: 2.6 }] : []),
-  ];
-  const adminAt = dodo ? 4 : 3;
-  const all = parts(F, cuts);
+  const dodo = proHasDodo;
+  const adminAt = proAdminAt;
+  const all = proPs(F);
   const one = (i: number) => [{ ...all[i]!, from: 0 }];
   const labels = ['Free 14-day trial · add a co-host', 'Schedule the next drop', 'Founding price · $4.50 / month', ...(dodo ? ['Dodo Payments · test mode'] : []), 'Operator page · test payments received'];
   return (
@@ -315,7 +297,7 @@ const Pro: React.FC<{ F: number }> = ({ F }) => {
 // ---------- 13. proof ----------
 const Proof: React.FC<{ F: number }> = ({ F }) => {
   const f = useCurrentFrame();
-  const A = Math.round(5.7 * FPS);
+  const A = PROOF.A;
   const api = data.activity.filter((e) => e.dir === 'api');
   const busy = M('drop2', -2500);
   const feedPs = [{ a: busy, b: busy + 22_000, from: 0, frames: A, rate: 22_000 / 1000 / (A / FPS) }];
@@ -343,9 +325,9 @@ const Proof: React.FC<{ F: number }> = ({ F }) => {
       <Sequence from={A}>
         <Row gap={44}>
           <Terminal w={1240} h={800} blocks={[
-            { cmd: 'npm run test:race', lines: pick(T.race, 9), at: 6, per: 2.2 },
-            { cmd: 'npm run test:billing', lines: pick(T.billing, 3), at: 110, per: 2.2 },
-            { cmd: 'npm run test:webhooks', lines: pick(T.webhooks, 3), at: 160, per: 2.2 },
+            { cmd: PROOF.cmds[0]!, lines: pick(T.race, 9), at: PROOF.blocks[0]!, per: 2.2 },
+            { cmd: PROOF.cmds[1]!, lines: pick(T.billing, 3), at: PROOF.blocks[1]!, per: 2.2 },
+            { cmd: PROOF.cmds[2]!, lines: pick(T.webhooks, 3), at: PROOF.blocks[2]!, per: 2.2 },
           ]} />
           <div style={{ width: 380, color: '#fff', display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ fontFamily: display, fontWeight: 800, fontSize: 190, letterSpacing: -8, lineHeight: 1, color: shown === total ? '#7be3b5' : '#fff' }}>{shown}</div>
@@ -377,27 +359,18 @@ const End: React.FC = () => {
 };
 
 // ---------- timeline ----------
-export const SCENES: { id: string; frames: number; el: (F: number) => React.ReactNode }[] = [
-  { id: 'cold', frames: frames('cold', 0.9), el: () => <ColdOpen /> },
-  { id: 'title', frames: frames('title', 1.1), el: () => <Title /> },
-  { id: 'setup', frames: frames('setup'), el: (F) => <Setup F={F} /> },
-  { id: 'join', frames: frames('join'), el: (F) => <Join F={F} /> },
-  { id: 'claim', frames: frames('claim', 1.2), el: (F) => <Claim F={F} /> },
-  { id: 'checkout', frames: frames('checkout'), el: (F) => <Checkout F={F} /> },
-  { id: 'race', frames: frames('race', 1.6), el: (F) => <Race F={F} /> },
-  { id: 'scam', frames: frames(SCAM, 1.0), el: (F) => <Scam F={F} /> },
-  { id: 'reply', frames: frames(REPLY), el: (F) => <Reply F={F} /> },
-  { id: 'promote', frames: frames('promote', 1.2), el: (F) => <Promote F={F} /> },
-  { id: 'recap', frames: frames('recap', 1.0), el: (F) => <Recap F={F} /> },
-  { id: 'pro', frames: frames('pro', 1.0), el: (F) => <Pro F={F} /> },
-  { id: 'proof', frames: frames('proof', 1.2), el: (F) => <Proof F={F} /> },
-  { id: 'end', frames: frames('end', 2.6), el: () => <End /> },
-];
-export const TOTAL = SCENES.reduce((s, x) => s + x.frames, 0);
+const EL: Record<string, (F: number) => React.ReactNode> = {
+  cold: () => <ColdOpen />, title: () => <Title />, setup: (F) => <Setup F={F} />, join: (F) => <Join F={F} />, claim: (F) => <Claim F={F} />,
+  checkout: (F) => <Checkout F={F} />, race: (F) => <Race F={F} />, scam: (F) => <Scam F={F} />, reply: (F) => <Reply F={F} />,
+  promote: (F) => <Promote F={F} />, recap: (F) => <Recap F={F} />, pro: (F) => <Pro F={F} />, proof: (F) => <Proof F={F} />, end: () => <End />,
+};
+export const SCENES = TIMES.map((t) => ({ id: t.id, frames: t.frames, el: EL[t.id]! }));
+export { TOTAL };
 
 export const Demo: React.FC = () => (
   <AbsoluteFill style={{ background: C.paper }}>
     <Series>{SCENES.map((s) => <Series.Sequence key={s.id} durationInFrames={s.frames}>{s.el(s.frames)}</Series.Sequence>)}</Series>
-    <Audio src={staticFile('music.wav')} volume={(f) => interpolate(f, [0, 30, TOTAL - 75, TOTAL - 5], [0, 0.1, 0.1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' })} loop />
+    <Audio src={staticFile('music.wav')} volume={musicVolume} />
+    {SOUNDS.map((x, i) => <Sequence key={i} from={x.at} layout="none"><Audio src={staticFile(`sfx/${x.name}.wav`)} volume={x.v} /></Sequence>)}
   </AbsoluteFill>
 );

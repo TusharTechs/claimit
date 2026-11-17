@@ -1,30 +1,16 @@
 import React from 'react';
-import { AbsoluteFill, Img, OffthreadVideo, Sequence, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
+import { AbsoluteFill, Img, OffthreadVideo, Sequence, getInputProps, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
 import { C, FPS, display, mono, sans } from './theme';
 import { data, type Activity, type Trace } from './data';
 
 // ---------- footage on the shared timeline ----------
-export interface PartDef { a: number; b: number; w?: number; frames?: number }
-export interface Part { a: number; b: number; from: number; frames: number; rate: number }
-/** Split `total` frames between source windows (ms): fixed `frames` first, the rest by weight `w`. */
-export function parts(total: number, defs: PartDef[]): Part[] {
-  const fixed = defs.reduce((s, d) => s + (d.frames ?? 0), 0);
-  const wsum = defs.reduce((s, d) => s + (d.frames ? 0 : d.w ?? 1), 0) || 1;
-  let from = 0;
-  return defs.map((d, i) => {
-    let frames = d.frames ?? Math.round(((total - fixed) * (d.w ?? 1)) / wsum);
-    if (i === defs.length - 1) frames = Math.max(1, total - from);
-    const p = { a: d.a, b: d.b, from, frames, rate: (d.b - d.a) / 1000 / (frames / FPS) };
-    from += frames;
-    return p;
-  });
-}
-const partAt = (ps: Part[], f: number) => ps.find((p) => f >= p.from && f < p.from + p.frames) ?? ps[ps.length - 1]!;
-/** Recording time (ms) shown at a frame of the scene. */
-export const srcAt = (ps: Part[], f: number) => { const p = partAt(ps, f); return p.a + ((f - p.from) / FPS) * 1000 * p.rate; };
-export const rateAt = (ps: Part[], f: number) => partAt(ps, f).rate;
+export { parts, srcAt, rateAt, frameOf, type Part, type PartDef } from './timeline';
+import { rateAt, type Part } from './timeline';
 
-export const Footage: React.FC<{ actor: string; ps: Part[]; w: number; h: number }> = ({ actor, ps, w, h }) => (
+/** `--props='{"audioOnly":true}'` renders the soundtrack alone, without decoding any footage (a re-score takes a minute, not twenty). */
+const AUDIO_ONLY = Boolean((getInputProps() as { audioOnly?: boolean }).audioOnly);
+
+export const Footage: React.FC<{ actor: string; ps: Part[]; w: number; h: number }> = ({ actor, ps, w, h }) => AUDIO_ONLY ? <div style={{ width: w, height: h }} /> : (
   <div style={{ width: w, height: h, position: 'relative', background: C.paper, overflow: 'hidden' }}>
     {ps.map((p, i) => (
       <Sequence key={i} from={p.from} durationInFrames={p.frames} layout="none">
