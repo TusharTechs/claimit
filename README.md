@@ -20,7 +20,7 @@
 | Open a shop as a seller | <https://35-224-27-222.sslip.io/sell> |
 | Pricing | <https://35-224-27-222.sslip.io/pricing> |
 | Business model canvas and unit economics | <https://35-224-27-222.sslip.io/business> |
-| Demo video (2:16) | _YouTube link added at submission_ |
+| Demo video (2:16) | <https://youtu.be/DrnhcDkRyEc> |
 | Source code | <https://github.com/TusharTechs/claimit> |
 | How the demo video was made | [demo-video/README.md](demo-video/README.md) |
 | Nexconn Console | <https://console.nexconn.ai> |
