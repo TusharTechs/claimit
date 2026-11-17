@@ -632,7 +632,8 @@ function Feed({ feed, people, meId, sellerId }: { feed: FeedEntry[]; people: Peo
     // Follow new activity only if the viewer is already near the bottom — never yank the item card out of view.
     const el = end.current; const scroller = el?.closest('.overflow-y-auto') as HTMLElement | null;
     if (!el || !scroller) return;
-    if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 140) el.scrollIntoView({ block: 'end', behavior: 'smooth' });
+    // At the very top the item card is what they're looking at: a page that only just overflows counts as "near the bottom" too.
+    if (scroller.scrollTop > 40 && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 140) el.scrollIntoView({ block: 'end', behavior: 'smooth' });
   }, [lastId]);
   return (
     <div className="space-y-1.5 px-4 pb-3 pt-4" role="log" aria-live="off" aria-label="Live room activity">
