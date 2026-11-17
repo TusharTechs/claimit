@@ -1,0 +1,66 @@
+[
+ {
+  "id": "cold",
+  "text": "Every day, sellers post a photo and say: first to comment 'mine' gets it. Then forty people comment in the same second, and nobody agrees who was first."
+ },
+ {
+  "id": "title",
+  "text": "This is ClaimIt. One link. One tap. One winner. Built on Nexconn."
+ },
+ {
+  "id": "setup",
+  "text": "Maya opens her shop in under a minute. No app, no password. She adds three pieces, and goes live with a single link."
+ },
+ {
+  "id": "join",
+  "text": "Her buyers tap that link from her story, and land in a Nexconn open channel. Her console counts them in, live."
+ },
+ {
+  "id": "claim",
+  "text": "Maya drops the first item. Priya taps claim, and it's hers. Leo and Mei join the line, and every screen shows the same queue."
+ },
+ {
+  "id": "checkout",
+  "text": "Priya adds her address, pays Maya directly, and Maya confirms. The order card in their private chat updates in place. That's Nexconn message metadata, signed by our server, so nobody can fake a paid order."
+ },
+ {
+  "id": "race",
+  "text": "Now, the real test. Three phones, tapping in the same few milliseconds. One winner. The others know exactly where they stand."
+ },
+ {
+  "id": "scam_hook",
+  "text": "A scammer drops a phone number into the room. Nexconn's pre-messaging webhook asks our server first, and the number is stripped before delivery. Three strikes, and they're muted, natively."
+ },
+ {
+  "id": "scam_mask",
+  "text": "A scammer drops a phone number into the room. It's masked before anyone can read it. Payment details only ever travel inside a ClaimIt order."
+ },
+ {
+  "id": "reply",
+  "text": "Maya answers the whole room from her console, as a priority message. And every order chat lives in one inbox, built with Nexconn's Chat UI kit."
+ },
+ {
+  "id": "reply_noinbox",
+  "text": "Maya answers the whole room from her console, as a priority message that is never dropped."
+ },
+ {
+  "id": "promote",
+  "text": "The winner never pays. When the hold runs out, the next in line is promoted, automatically. No screenshots. No arguing."
+ },
+ {
+  "id": "recap",
+  "text": "Drop over. Maya's recap: forty-two dollars rescued from a no-show, and zero arguments over who was first."
+ },
+ {
+  "id": "pro",
+  "text": "ClaimIt Pro adds co-hosts, scheduled drops, and lifetime analytics, for four fifty a month. With a real subscription checkout, shown here in test mode, and every payment landing on the operator page."
+ },
+ {
+  "id": "proof",
+  "text": "Under the hood, every call between our server and Nexconn shows up on the operator page, live. And sixty-one automated checks hold the line, including two hundred buyers claiming one item at once."
+ },
+ {
+  "id": "end",
+  "text": "ClaimIt. Fair drops, built on Nexconn. It's live right now. Go claim something."
+ }
+]
