@@ -22,3 +22,6 @@ demo-video/voice/models
 demo-video/public/vo
 demo-video/public/music.wav
 demo-video/public/sfx
+
+# submission write-up (contains the App Key)
+submission/
