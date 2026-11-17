@@ -10,7 +10,7 @@ import { Avatar, ConfirmSheet, CopyButton, ItemThumb, Logo, LogoMark, QR, Sheet,
 import { DMThread } from '../components/DMThread';
 import { ReportShop } from '../components/ReportShop';
 import { ensureBuyer, shopIdOf } from '../buyer';
-import { approx, embedUrl, mmss, money, payLinkFor, setCurrency, upiLink, useCountdown, useDebounced } from '../util';
+import { approx, embedUrl, mmss, money, payLinkFor, scrub, setCurrency, upiLink, useCountdown, useDebounced } from '../util';
 import {
   MSG, itemKey,
   type ChatContent, type DropCardContent, type DropState, type EventContent, type Item, type ItemState, type MyClaim, type PublicDrop,
@@ -28,9 +28,6 @@ type Toast = (t: string, tone?: 'hot' | 'mint' | 'ink') => void;
 const involves = (s: ItemState | undefined, id: string | undefined) =>
   !!s && !!id && (s.holder?.id === id || s.waitlist.some((w) => w.id === id));
 
-/** Hide phone numbers and UPI IDs in buyer chat: the #1 scam is "pay me directly at …". */
-const PAY_SCAM = /([\w.\-]{2,}@[a-z][\w-]*(?:\.[\w-]+)*)|((?:paypal\.me|venmo\.com|cash\.app|wa\.me|gcash\.me)\/\S+)|(\$[A-Za-z][\w]{2,})|(\+?\d[\d\s().-]{6,}\d)/gi;
-const scrub = (t: string) => t.replace(PAY_SCAM, (m, _e, _l, _t, phone) => (phone && m.replace(/\D/g, '').length < 9 ? m : '•••'));
 
 export default function Room() {
   const { dropId = '' } = useParams();

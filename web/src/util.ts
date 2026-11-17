@@ -103,3 +103,7 @@ export const initials = (name: string) => name.replace(/\([^)]*\)/g, '').split(/
 
 const HUES = [12, 28, 160, 200, 260, 320, 45, 100];
 export const hueFor = (id: string) => HUES[[...id].reduce((a, c) => a + c.charCodeAt(0), 0) % HUES.length];
+
+/** Hide phone numbers and UPI IDs in buyer chat: the #1 scam is "pay me directly at …". */
+const PAY_SCAM = /([\w.\-]{2,}@[a-z][\w-]*(?:\.[\w-]+)*)|((?:paypal\.me|venmo\.com|cash\.app|wa\.me|gcash\.me)\/\S+)|(\$[A-Za-z][\w]{2,})|(\+?\d[\d\s().-]{6,}\d)/gi;
+export const scrub = (t: string) => t.replace(PAY_SCAM, (m, _e, _l, _t, phone) => (phone && m.replace(/\D/g, '').length < 9 ? m : '•••'));

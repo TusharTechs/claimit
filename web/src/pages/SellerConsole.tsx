@@ -6,7 +6,7 @@ import { Avatar, ConfirmSheet, CopyButton, ItemThumb, Logo, LogoMark, QR, Sheet,
 import { ExternalLink, Play } from 'lucide-react';
 import { DMThread } from '../components/DMThread';
 import { chatUIReady, mountChatUI, openDirect, setupChatUI } from '../chatui';
-import { currencySymbol, mmss, money, resizeImage, setCurrency, telHref, useCountdown, useDebounced } from '../util';
+import { currencySymbol, mmss, money, resizeImage, scrub, setCurrency, telHref, useCountdown, useDebounced } from '../util';
 import { MSG, type ChatContent, type EventContent, type Item } from '../../../shared/types';
 
 type Tab = 'pay' | 'room' | 'inbox';
@@ -100,7 +100,7 @@ export default function SellerConsole() {
         if (m.type === MSG.CHAT || (m.type === MSG.SELLER_CHAT && m.sender === data?.drop.sellerId)) {
           const c = m.content as ChatContent;
           if (!m.mine) { wantedNames.current.add(m.sender); resolveNames(); if (tabRef.current !== 'room') setRoomUnread((n) => n + 1); }
-          setFeed((f) => f.some((x) => x.id === m.id) ? f : [...f.slice(-120), { id: m.id, text: c.text, from: m.sender, mine: m.mine, kind: 'chat' }]);
+          setFeed((f) => f.some((x) => x.id === m.id) ? f : [...f.slice(-120), { id: m.id, text: m.type === MSG.CHAT && !m.mine ? scrub(c.text) : c.text, from: m.sender, mine: m.mine, kind: 'chat' }]);
         }
         else if (m.type === MSG.EVENT) { const ev = m.content as EventContent; setFeed((f) => [...f.slice(-120), { id: m.id, text: ev.text, kind: ev.kind }]); refresh(); }
       } else if (m.kind === 'direct' && !m.mine) {
